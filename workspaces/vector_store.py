@@ -57,7 +57,7 @@ class VectorStoreService:
         )
 
     @classmethod
-    def query_workspace_context(cls, workspace_id, query_text, n_results=4):
+    def query_workspace_context(cls, workspace_id, query_text, n_results=20):
         """
         Searches the workspace's local vector collection for the text chunks 
         most semantically relevant to a user query.

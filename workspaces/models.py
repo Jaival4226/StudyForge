@@ -9,7 +9,13 @@ class Workspace(models.Model):
     and AI-generated learning artifacts for a specific study topic.
     """
     title = models.CharField(max_length=255)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='workspaces')
+    
+    # UPDATED: Renamed from 'user' to 'owner' to clarify permissions
+    owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='owned_workspaces')
+    
+    # NEW: The list of other users who have access to this workspace
+    collaborators = models.ManyToManyField(User, related_name='shared_workspaces', blank=True)
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

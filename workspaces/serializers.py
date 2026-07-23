@@ -17,10 +17,8 @@ class DocumentSerializer(serializers.ModelSerializer):
         fields = ['id', 'workspace', 'title', 'type', 'source_url', 'file_upload', 'created_at']
 
 class WorkspaceSerializer(serializers.ModelSerializer):
-    # Nested serializers to return all related docs and artifacts when fetching a workspace
-    documents = DocumentSerializer(many=True, read_only=True)
-    artifacts = ArtifactSerializer(many=True, read_only=True)
-
     class Meta:
         model = Workspace
-        fields = ['id', 'title', 'user', 'documents', 'artifacts', 'created_at']
+        # FIX: Removed 'name' because it doesn't exist in your database model!
+        fields = ['id', 'owner', 'collaborators'] 
+        read_only_fields = ['owner']
