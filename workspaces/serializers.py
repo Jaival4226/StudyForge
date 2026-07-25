@@ -17,8 +17,17 @@ class DocumentSerializer(serializers.ModelSerializer):
         fields = ['id', 'workspace', 'title', 'type', 'source_url', 'file_upload', 'created_at']
 
 class WorkspaceSerializer(serializers.ModelSerializer):
+    # Create two read-only fields that calculate on the fly
+    is_owner = serializers.SerializerMethodField()
+    owner_username = serializers.CharField(source='owner.username', read_only=True)
+
     class Meta:
         model = Workspace
-        # FIX: Removed 'name' because it doesn't exist in your database model!
-        fields = ['id', 'owner', 'collaborators'] 
-        read_only_fields = ['owner']
+        fields = '__all__' # This safely grabs all your existing fields plus the two new ones above
+
+    def get_is_owner(self, obj):
+        request = self.context.get('request')
+        # Check if the person asking the API is the actual owner
+        if request and hasattr(request, 'user'):
+            return obj.owner == request.user
+        return False

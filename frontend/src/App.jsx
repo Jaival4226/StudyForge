@@ -12,12 +12,13 @@ import ManageDocuments from './ManageDocuments';
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('auth_token'));
   const [refreshKey, setRefreshKey] = useState(0);
-  
-  // --- NEW WORKSPACE MANAGEMENT STATE ---
+
+  // --- WORKSPACE MANAGEMENT STATE ---
   const [workspaces, setWorkspaces] = useState([]);
   const [workspaceId, setWorkspaceId] = useState('');
-  
-  const [activeVideoId, setActiveVideoId] = useState('BJ-VvGyQxho');
+
+  // Start with an empty video ID instead of a hardcoded one
+  const [activeVideoId, setActiveVideoId] = useState('');
   const [query, setQuery] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -25,7 +26,7 @@ export default function App() {
   const [pendingSeek, setPendingSeek] = useState(null);
   const playerRef = useRef(null);
 
-  // --- NEW: FETCH AVAILABLE WORKSPACES ---
+  // --- FETCH AVAILABLE WORKSPACES ---
   useEffect(() => {
     if (!token) return;
     const loadWorkspaces = async () => {
@@ -46,9 +47,16 @@ export default function App() {
       }
     };
     loadWorkspaces();
-  }, [token, refreshKey]); // reload list if refreshKey changes
+  }, [token, refreshKey]);
 
-  // --- NEW: FETCH CHAT HISTORY ON WORKSPACE CHANGE ---
+  // --- CLEAR VIDEO STATE ON WORKSPACE CHANGE ---
+  useEffect(() => {
+    if (workspaceId) {
+      setActiveVideoId(''); // Resets the video player to the placeholder
+    }
+  }, [workspaceId]);
+
+  // --- FETCH CHAT HISTORY ON WORKSPACE CHANGE ---
   useEffect(() => {
     if (!token || !workspaceId) return;
     const fetchChatHistory = async () => {
@@ -165,9 +173,13 @@ export default function App() {
     setToken(null);
     setChatHistory([]);
     setWorkspaceId('');
+    setActiveVideoId('');
   };
 
   if (!token) return <Login setToken={setToken} />;
+
+  // Helper variable to find the active workspace object safely
+  const activeWorkspace = workspaces.find(w => w.id.toString() === workspaceId?.toString());
 
   return (
     <div className="w-full h-screen bg-gray-900 text-gray-100 flex flex-col font-sans">
@@ -176,8 +188,8 @@ export default function App() {
           <div className="bg-blue-600 p-2 rounded-lg font-bold text-white tracking-wider">AC</div>
           <h1 className="text-xl font-bold tracking-tight text-white">Academic AI Workspace <span className="text-xs text-blue-400 font-mono">v3.0</span></h1>
         </div>
-        
-        {/* --- THE NEW WORKSPACE SWITCHER --- */}
+
+        {/* --- WORKSPACE SWITCHER --- */}
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-3 bg-gray-900 px-3 py-1.5 rounded-md border border-gray-700">
             <FolderSync className="w-4 h-4 text-purple-400" />
@@ -207,24 +219,35 @@ export default function App() {
       <main className="flex-1 w-full flex overflow-hidden">
         {/* LEFT COLUMN */}
         <section className="w-1/2 h-full bg-gray-950 border-r border-gray-800 flex flex-col items-center p-6 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700">
-          
+
           <div className="w-full mb-4 flex items-center space-x-2 bg-gray-900 px-4 py-2 rounded-xl border border-gray-800 shadow-sm mt-auto shrink-0">
             <span className="text-xs text-gray-400 font-mono uppercase tracking-wider">Active Video ID:</span>
             <input
               type="text"
-              value={activeVideoId}
+              value={activeVideoId || ''}
               onChange={(e) => setActiveVideoId(e.target.value)}
+              placeholder="Waiting for video selection..."
               className="flex-1 bg-transparent text-blue-400 font-mono text-sm focus:outline-none"
             />
           </div>
 
           <div className="w-full aspect-video bg-gray-900 rounded-xl overflow-hidden border border-gray-800 shadow-2xl flex items-center justify-center shrink-0">
-            <YouTube
-              videoId={activeVideoId}
-              opts={{ width: '100%', height: '100%', playerVars: { autoplay: 0 } }}
-              onReady={onPlayerReady}
-              className="w-full h-full aspect-video"
-            />
+            {activeVideoId ? (
+              <YouTube
+                videoId={activeVideoId}
+                opts={{ width: '100%', height: '100%', playerVars: { autoplay: 0 } }}
+                onReady={onPlayerReady}
+                className="w-full h-full aspect-video"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full bg-gray-900 border-2 border-dashed border-gray-700 rounded-xl text-gray-500 w-full">
+                <svg className="w-12 h-12 mb-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                </svg>
+                <p className="text-sm font-medium text-gray-300">Video will be shown here</p>
+                <p className="text-xs mt-1 text-gray-500">Ask the AI a question to load an intelligent video timestamp</p>
+              </div>
+            )}
           </div>
 
           <div className="mt-4 mb-6 text-center max-w-md shrink-0">
@@ -233,55 +256,33 @@ export default function App() {
             </h3>
           </div>
 
-          <div className="w-full max-w-md border-t border-gray-800 pt-6 pb-2 shrink-0">
-            {workspaceId ? (
-               <UploadZone workspaceId={workspaceId} />
-            ) : (
-               <p className="text-xs text-gray-500 text-center">Select or create a workspace to upload files.</p>
-            )}
-          </div>
+          {/* --- CONDITIONAL UPLOAD ZONE (Only owners can upload) --- */}
+          {activeWorkspace?.is_owner && (
+            <div className="w-full max-w-md border-t border-gray-800 pt-6 pb-2 shrink-0">
+              <UploadZone workspaceId={workspaceId} />
+            </div>
+          )}
 
+          {/* --- MANAGEMENT ZONES --- */}
           <div className="w-full max-w-md space-y-4 shrink-0 pb-10">
-            {workspaceId && (
+            {workspaceId && activeWorkspace && (
               <>
-                <InviteCollaborator 
-                  workspaceId={workspaceId} 
-                  onInviteSuccess={() => setRefreshKey(prev => prev + 1)} 
-                />
-                <ManageCollaborators 
-                  workspaceId={workspaceId} 
-                  refreshKey={refreshKey} 
-                />
-              </>
-            )}
-          </div>
-          {/* --- INTEGRATED UPLOAD ZONE --- */}
-          <div className="w-full max-w-md border-t border-gray-800 pt-6 pb-2 shrink-0">
-            {workspaceId ? (
-               <UploadZone workspaceId={workspaceId} />
-            ) : (
-               <p className="text-xs text-gray-500 text-center">Select or create a workspace to upload files.</p>
-            )}
-          </div>
-
-          {/* --- MANAGEMENT ZONES (Docs & Collaborators) --- */}
-          <div className="w-full max-w-md space-y-4 shrink-0 pb-10">
-            {workspaceId && (
-              <>
-                {/* NEW: Document Management Panel */}
-                <ManageDocuments 
-                  workspaceId={workspaceId} 
-                  refreshKey={refreshKey} 
-                />
-                
-                <InviteCollaborator 
-                  workspaceId={workspaceId} 
-                  onInviteSuccess={() => setRefreshKey(prev => prev + 1)} 
-                />
-                <ManageCollaborators 
-                  workspaceId={workspaceId} 
-                  refreshKey={refreshKey} 
-                />
+                {activeWorkspace.is_owner ? (
+                  <>
+                    <ManageDocuments workspaceId={workspaceId} refreshKey={refreshKey} />
+                    <InviteCollaborator workspaceId={workspaceId} onInviteSuccess={() => setRefreshKey(prev => prev + 1)} />
+                    <ManageCollaborators workspaceId={workspaceId} refreshKey={refreshKey} />
+                  </>
+                ) : (
+                  <div className="bg-blue-900/30 border border-blue-700 p-4 rounded-xl flex flex-col items-center justify-center text-center space-y-2 mt-4 shadow-sm">
+                    <div className="bg-blue-600 p-2 rounded-full">
+                      <FolderSync className="w-5 h-5 text-white" />
+                    </div>
+                    <span className="text-sm text-blue-200">
+                      You are collaborating in a workspace shared by <span className="font-bold text-white capitalize">{activeWorkspace.owner_username}</span>
+                    </span>
+                  </div>
+                )}
               </>
             )}
           </div>

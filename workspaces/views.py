@@ -22,7 +22,7 @@ from .models import Workspace
 from .models import Document
 
 @api_view(['POST'])
-@permission_classes([AllowAny]) # Bypasses the bouncer so strangers can sign up!
+@permission_classes([AllowAny])
 def register_user(request):
     username = request.data.get('username')
     password = request.data.get('password')
@@ -36,8 +36,8 @@ def register_user(request):
     # 1. Create the new user
     user = User.objects.create_user(username=username, password=password)
     
-    # 2. Auto-generate their very first private workspace!
-    Workspace.objects.create(name=f"{username}'s Workspace", owner=user)
+    # 2. Auto-generate their very first private workspace! (FIXED: Removed 'name')
+    Workspace.objects.create(owner=user)
 
     # 3. Log them in
     token, _ = Token.objects.get_or_create(user=user)
