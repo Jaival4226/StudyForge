@@ -90,6 +90,42 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
             traceback.print_exc()
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=True, methods=['post'])
+    def generate_artifact(self, request, pk=None):
+        """
+        NEW: Generates a structured artifact using the AI Engine,
+        saves it to the SQLite database, and returns it to the frontend.
+        """
+        workspace = self.get_object()
+        prompt = request.data.get('prompt')
+        title = request.data.get('title', 'Generated Artifact')
+        # Extract the requested type from the frontend (defaults to markdown)
+        artifact_type = request.data.get('artifact_type', 'markdown')
+
+        if not prompt:
+            return Response({"error": "A prompt is required to generate an artifact."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # 1. Generate the content via Gemini based on the type
+            generated_content = AIEngine.generate_artifact(
+                workspace_id=workspace.id,
+                user_query=prompt,
+                artifact_type=artifact_type
+            )
+            
+            # 2. Save it as a new Artifact record
+            artifact = Artifact.objects.create(
+                workspace=workspace,
+                title=title,
+                content=generated_content,
+                artifact_type=artifact_type
+            )
+            
+            return Response(ArtifactSerializer(artifact).data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            traceback.print_exc()
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     @action(detail=True, methods=['get'])
     def list_collaborators(self, request, pk=None):
         workspace = self.get_object()
@@ -138,24 +174,16 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def delete_document(self, request, pk=None):
-        """Allows the owner to delete a document from the workspace and purges its vectors."""
         workspace = self.get_object()
-        
-        # Security: Only the owner can delete files
         if workspace.owner != request.user:
             return Response({'error': 'Only the owner can delete files.'}, status=status.HTTP_403_FORBIDDEN)
             
         doc_id = request.data.get('document_id')
         try:
             doc = Document.objects.get(id=doc_id, workspace=workspace)
-            
-            # 1. NEW: Purge the ghost vectors from ChromaDB FIRST!
             VectorStoreService.delete_document_chunks(workspace.id, doc.id)
-            
-            # 2. Delete the SQLite record and the physical file
             doc.delete()
-            
-            return Response({'message': 'Document and vectors deleted successfully'}, status=status.HTTP_200_OK)
+            return Response({'message': 'Document deleted successfully'}, status=status.HTTP_200_OK)
         except Document.DoesNotExist:
             return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -213,7 +241,6 @@ class FileUploadView(APIView):
             final_title = ""
             source_url = ""
 
-            # ROUTE A: YOUTUBE VIDEO
             if upload_type == 'youtube':
                 youtube_url = request.data.get('youtube_url')
                 if not youtube_url:
@@ -233,12 +260,10 @@ class FileUploadView(APIView):
                 except Exception:
                     pass
 
-                # Attempt extraction FIRST
                 chunks = IngestionEngine.process_youtube(youtube_url)
                 if not chunks:
                     return Response({"error": "Failed to extract transcript from YouTube video."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # ROUTE B: LOCAL PDF FILE
             elif upload_type == 'file':
                 file_obj = request.FILES.get('file')
                 if not file_obj:
@@ -255,15 +280,13 @@ class FileUploadView(APIView):
                     for chunk in file_obj.chunks():
                         destination.write(chunk)
                 
-                # Attempt extraction FIRST and pass the title to the engine
                 chunks = IngestionEngine.process_pdf(filepath, final_title)
                 
                 if not chunks:
                     if os.path.exists(filepath):
-                        os.remove(filepath) # Clean up the broken file
+                        os.remove(filepath) 
                     return Response({"error": "Failed to extract text from PDF."}, status=status.HTTP_400_BAD_REQUEST)
 
-            # THE FIX: Only create the database record if chunks exist!
             if chunks:
                 doc = Document.objects.create(
                     workspace=workspace,

@@ -6,7 +6,7 @@ from .models import Workspace, Document, Artifact
 class ArtifactSerializer(serializers.ModelSerializer):
     class Meta:
         model = Artifact
-        fields = ['id', 'type', 'data_json', 'created_at']
+        fields = '__all__'
 
 class DocumentSerializer(serializers.ModelSerializer):
     # Ensure workspace is NOT marked as read_only=True

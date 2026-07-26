@@ -48,19 +48,14 @@ class Document(models.Model):
 
 
 class Artifact(models.Model):
-    """
-    Stores structured AI-generated learning data (such as JSON arrays of 
-    flashcards, terms, definitions, or matching games) generated from workspace content.
-    """
-    ARTIFACT_TYPES = [
-        ('quiz', 'Quiz'),
-        ('flashcard', 'Flashcard Set'),
-    ]
-
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name='artifacts')
-    type = models.CharField(max_length=15, choices=ARTIFACT_TYPES)
-    data_json = models.JSONField()  # Enforces structural JSON directly inside SQLite
+    title = models.CharField(max_length=255)
+    content = models.TextField()
+    
+    # NEW: Tracks the format for the frontend (markdown, graph, flashcards)
+    artifact_type = models.CharField(max_length=50, default='markdown') 
+    
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"[{self.get_type_display()}] - {self.workspace.title}"
+        return self.title

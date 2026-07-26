@@ -8,10 +8,12 @@ import UploadZone from './UploadZone';
 import InviteCollaborator from './InviteCollaborator';
 import ManageCollaborators from './ManageCollaborators';
 import ManageDocuments from './ManageDocuments';
+import ArtifactsPanel from './ArtifactsPanel';
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('auth_token'));
   const [refreshKey, setRefreshKey] = useState(0);
+  const [rightPanelTab, setRightPanelTab] = useState('chat'); // 'chat' or 'artifacts'
 
   // --- WORKSPACE MANAGEMENT STATE ---
   const [workspaces, setWorkspaces] = useState([]);
@@ -259,9 +261,9 @@ export default function App() {
           {/* --- CONDITIONAL UPLOAD ZONE (Only owners can upload) --- */}
           {activeWorkspace?.is_owner && (
             <div className="w-full max-w-md border-t border-gray-800 pt-6 pb-2 shrink-0">
-              <UploadZone 
-                workspaceId={workspaceId} 
-                onUploadSuccess={() => setRefreshKey(prev => prev + 1)} 
+              <UploadZone
+                workspaceId={workspaceId}
+                onUploadSuccess={() => setRefreshKey(prev => prev + 1)}
               />
             </div>
           )}
@@ -292,48 +294,73 @@ export default function App() {
         </section>
 
         {/* RIGHT COLUMN */}
-        <section className="w-1/2 h-full flex flex-col bg-gray-900">
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {chatHistory.length === 0 && !loading ? (
-              <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 space-y-3">
-                <MessageSquare className="w-12 h-12 text-gray-700" />
-                <p className="text-sm">Workspace chat ready. Ask anything about your ingested knowledge base!</p>
-              </div>
-            ) : (
-              chatHistory.map((msg, i) => (
-                <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-md text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-100 rounded-bl-none border border-gray-700'}`}>
-                    {msg.role === 'user' ? msg.text : renderMessageWithSmartTimestamps(msg.text)}
-                  </div>
-                </div>
-              ))
-            )}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="bg-gray-800 border border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 text-sm text-gray-400 animate-pulse">
-                  AI Brain is processing context from all videos...
-                </div>
-              </div>
-            )}
+        <section className="w-1/2 h-full flex flex-col bg-[#0B0D17]">
+          {/* Tab Toggle Header */}
+          <div className="flex justify-center items-center py-2 bg-gray-900 border-b border-gray-800 shrink-0 space-x-2">
+            <button
+              onClick={() => setRightPanelTab('chat')}
+              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors ${rightPanelTab === 'chat' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+            >
+              AI Chat
+            </button>
+            <button
+              onClick={() => setRightPanelTab('artifacts')}
+              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors ${rightPanelTab === 'artifacts' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+            >
+              Artifacts
+            </button>
           </div>
 
-          <form onSubmit={handleSendMessage} className="p-4 bg-gray-800 border-t border-gray-700 flex space-x-3 items-center shrink-0">
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask a question about your ingested knowledge base..."
-              disabled={!workspaceId}
-              className="flex-1 bg-gray-900 text-gray-100 placeholder-gray-500 px-4 py-3 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-500 transition-colors text-sm disabled:opacity-50"
-            />
-            <button
-              type="submit"
-              disabled={loading || !workspaceId}
-              className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-xl cursor-pointer disabled:opacity-50 transition-colors shadow-lg"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
+          {/* Render the selected panel */}
+          {rightPanelTab === 'chat' ? (
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                {chatHistory.length === 0 && !loading ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 space-y-3">
+                    <MessageSquare className="w-12 h-12 text-gray-700" />
+                    <p className="text-sm">Workspace chat ready. Ask anything about your ingested knowledge base!</p>
+                  </div>
+                ) : (
+                  chatHistory.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-md text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-100 rounded-bl-none border border-gray-700'}`}>
+                        {msg.role === 'user' ? msg.text : renderMessageWithSmartTimestamps(msg.text)}
+                      </div>
+                    </div>
+                  ))
+                )}
+                {loading && (
+                  <div className="flex justify-start">
+                    <div className="bg-gray-800 border border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 text-sm text-gray-400 animate-pulse">
+                      AI Brain is processing context from all videos...
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <form onSubmit={handleSendMessage} className="p-4 bg-gray-800 border-t border-gray-700 flex space-x-3 items-center shrink-0">
+                <input
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Ask a question about your ingested knowledge base..."
+                  disabled={!workspaceId}
+                  className="flex-1 bg-gray-900 text-gray-100 placeholder-gray-500 px-4 py-3 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-500 transition-colors text-sm disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={loading || !workspaceId}
+                  className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-xl cursor-pointer disabled:opacity-50 transition-colors shadow-lg"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-hidden p-4">
+              <ArtifactsPanel workspaceId={workspaceId} />
+            </div>
+          )}
         </section>
       </main>
     </div>
