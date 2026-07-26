@@ -259,7 +259,10 @@ export default function App() {
           {/* --- CONDITIONAL UPLOAD ZONE (Only owners can upload) --- */}
           {activeWorkspace?.is_owner && (
             <div className="w-full max-w-md border-t border-gray-800 pt-6 pb-2 shrink-0">
-              <UploadZone workspaceId={workspaceId} />
+              <UploadZone 
+                workspaceId={workspaceId} 
+                onUploadSuccess={() => setRefreshKey(prev => prev + 1)} 
+              />
             </div>
           )}
 

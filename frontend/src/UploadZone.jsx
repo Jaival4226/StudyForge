@@ -2,12 +2,12 @@
 import React, { useState } from 'react';
 import { Video, FileText } from 'lucide-react';
 
-export default function UploadZone({ workspaceId }) {
+export default function UploadZone({ workspaceId, onUploadSuccess }) { 
   const [inputType, setInputType] = useState('youtube'); 
   const [file, setFile] = useState(null);
   const [youtubeUrl, setYoutubeUrl] = useState('');
   
-  // NEW: State for the optional custom title
+  // State for the optional custom title
   const [customTitle, setCustomTitle] = useState(''); 
   
   const [statusMessage, setStatusMessage] = useState('');
@@ -32,7 +32,7 @@ export default function UploadZone({ workspaceId }) {
     formData.append('type', inputType);
     formData.append('workspace_id', workspaceId); 
     
-    // NEW: Attach the custom title if the user typed one
+    // Attach the custom title if the user typed one
     if (customTitle.trim() !== '') {
         formData.append('title', customTitle);
     }
@@ -45,7 +45,8 @@ export default function UploadZone({ workspaceId }) {
 
     try {
       const token = localStorage.getItem('auth_token');
-      const response = await fetch('http://127.0.0.1:8000/api/upload/', {
+      // FIXED: Using localhost to match your other API calls and avoid CORS/Network issues
+      const response = await fetch('http://localhost:8000/api/upload/', {
         method: 'POST',
         headers: {
           'Authorization': `Token ${token}`
@@ -56,6 +57,10 @@ export default function UploadZone({ workspaceId }) {
       const data = await response.json();
 
       if (response.ok) {
+        // Trigger the automatic UI refresh!
+        if (onUploadSuccess) {
+          onUploadSuccess(); 
+        }
         setStatusMessage(`✅ Success: ${data.message}`);
         setFile(null);
         setYoutubeUrl('');
@@ -102,7 +107,7 @@ export default function UploadZone({ workspaceId }) {
           </div>
         ) : (
           <div className="space-y-3">
-            {/* NEW: Optional Title Input for PDFs */}
+            {/* Optional Title Input for PDFs */}
             <input 
               type="text" 
               placeholder="Document Title (Optional - defaults to filename)"

@@ -80,3 +80,15 @@ class VectorStoreService:
                     "source_type": meta["source_type"]
                 })
         return formatted_results
+    @classmethod
+    def delete_document_chunks(cls, workspace_id, document_id):
+        """
+        Removes all vector chunks associated with a specific document from ChromaDB.
+        """
+        try:
+            collection = cls.get_or_create_collection(workspace_id)
+            # Delete all chunks where the metadata matches the document_id
+            collection.delete(where={"document_id": document_id})
+            print(f"🗑️ Successfully purged vectors for Document {document_id}")
+        except Exception as e:
+            print(f"❌ Failed to purge vectors from ChromaDB: {e}")

@@ -3,7 +3,7 @@
 import google.generativeai as genai
 from django.conf import settings
 from .vector_store import VectorStoreService
-from .mongo_service import ChatMemoryService # <--- Import our new Mongo service
+from .mongo_service import ChatMemoryService
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
 # We will use temperature=0.0 to prevent it from messing up citations while looking at memory
@@ -28,7 +28,7 @@ class AIEngine:
             smart_tag = result.get('location', 'unknown')
             formatted_context += f"--- Chunk {idx + 1} ---\nSOURCE_TAG: [{smart_tag}]\nTEXT: {result.get('text', '')}\n\n"
 
-        # 3. NEW: Fetch Conversational Memory from MongoDB
+        # 3. Fetch Conversational Memory from MongoDB
         mongo_service = ChatMemoryService()
         raw_history = mongo_service.get_chat_history(workspace_id, user_id)
         
@@ -46,10 +46,11 @@ class AIEngine:
         CRITICAL BEHAVIORAL RULES:
         1. BE DOMAIN AGNOSTIC: You will be given context spanning many different subjects (code, history, psychology, etc.). You must answer the question based on whatever subject the context contains, without bias.
         2. BE COMPREHENSIVE: Extract maximum value from the provided chunks. Write highly detailed, multi-paragraph responses. Do NOT give short answers.
+        3. FILE AWARENESS (CRUCIAL): The user's uploaded files (PDFs, videos, etc.) have ALREADY been parsed into text by the backend and are provided to you below in "WORKSPACE DOCUMENTS". If the user asks you to explain a "PDF" or a "video", DO NOT claim you cannot see or read files. You MUST treat the "WORKSPACE DOCUMENTS" as the contents of those files.
         
         CRITICAL CITATION RULES (DO NOT IGNORE):
         1. You MUST cite your sources using the EXACT string provided in the 'SOURCE_TAG'.
-        2. NEVER drop the brackets. (e.g., CORRECT: [BJ-VvGyQxho|00:08:16] or [Page 1])
+        2. NEVER drop the brackets. (e.g., CORRECT: [oop_notes.pdf|Page 1])
         3. NEVER group multiple citations together.
         
         {formatted_memory}
@@ -63,7 +64,7 @@ class AIEngine:
         response = model.generate_content(system_prompt)
         answer_text = response.text
 
-        # 6. NEW: Save the new exchange to MongoDB
+        # 6. Save the new exchange to MongoDB
         mongo_service.save_message(workspace_id, user_id, role="user", text=user_query)
         mongo_service.save_message(workspace_id, user_id, role="ai", text=answer_text)
 
