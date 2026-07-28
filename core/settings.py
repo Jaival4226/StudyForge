@@ -58,7 +58,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     'corsheaders.middleware.CorsMiddleware', 
     "django.contrib.messages.middleware.MessageMiddleware",
-    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 ROOT_URLCONF = "core.urls"
@@ -135,3 +135,10 @@ STATICFILES_DIRS = [
 ]
 import os
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AQ.Ab8RN6KQgrAoMkA7yrfJDGNSSFqN7mgkqVqscNhIAZN8zKUcww")  
+# Allow PDFs to be embedded in the React iframe
+X_FRAME_OPTIONS = 'SAMEORIGIN'
+
+# Ensure Media directories are explicitly set
+import os
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')

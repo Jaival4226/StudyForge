@@ -96,10 +96,10 @@ class AIEngine:
                       "summary": "A punchy 1-2 sentence overview of the concept.",
                       "details": "A deeply detailed, multi-paragraph explanation of how this works, why it matters, and practical examples.",
                       "resources": [
-                        {{
+                        {{ 
                            "title": "Related Video Explanation", 
-                           "type": "video", 
-                           "link": "[Enter exact YouTube ID|Timestamp from source tag if available, or generate a high quality external search query]"
+                            "type": "video", 
+                            "link": "[Enter exact YouTube ID|Timestamp from source tag if available, or generate a high quality external search query]"
                         }}
                       ]
                   }},
@@ -111,7 +111,6 @@ class AIEngine:
                 {{ "id": "e1-2", "source": "1", "target": "2", "animated": true, "label": "leads to" }}
               ]
             }}
-
             Ensure positions are spread out hierarchically (e.g., y: 0, y: 150, y: 300) so nodes do not overlap in the React Flow UI.
             
             {formatted_context}
@@ -130,7 +129,26 @@ class AIEngine:
                 "tag": "Subtopic Category"
               }}
             ]
-
+            
+            {formatted_context}
+            Topic Request: {user_query}
+            """
+        # --- NEW: Added strict JSON schema for Interactive Quizzes ---
+        elif artifact_type == 'quiz':
+            system_prompt = f"""
+            You are an expert educator. Generate a highly interactive 5-question multiple-choice quiz based ONLY on the workspace context.
+            Return ONLY a valid JSON array matching this schema. DO NOT wrap the response in markdown code blocks.
+            
+            Schema:
+            [
+              {{
+                "question": "The text of the question?",
+                "options": ["Option A", "Option B", "Option C", "Option D"],
+                "correct_answer": "Option B",
+                "explanation": "A concise explanation of why this is the correct answer."
+              }}
+            ]
+            
             {formatted_context}
             Topic Request: {user_query}
             """
@@ -139,7 +157,7 @@ class AIEngine:
             You are an elite Academic Content Generator. 
             Create a highly structured, standalone markdown document based ONLY on the provided workspace context.
             Include detailed explanations, formatted code blocks (if applicable), and avoid all conversational filler.
-
+            
             {formatted_context}
             User Artifact Request: {user_query}
             """
