@@ -134,7 +134,19 @@ STATICFILES_DIRS = [
     BASE_DIR / 'frontend', 
 ]
 import os
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AQ.Ab8RN6KQgrAoMkA7yrfJDGNSSFqN7mgkqVqscNhIAZN8zKUcww")  
+# core/settings.py
+# core/settings.py
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from a .env file
+load_dotenv()
+
+# Read the comma-separated keys from the environment and convert them back into a list
+raw_keys = os.getenv("GEMINI_API_KEYS", "")
+GEMINI_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()]
+
+# (Keep the rest of your settings.py exactly the same)
 # Allow PDFs to be embedded in the React iframe
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 

@@ -52,9 +52,12 @@ class Artifact(models.Model):
     title = models.CharField(max_length=255)
     content = models.TextField()
     
-    # NEW: Tracks the format for the frontend (markdown, graph, flashcards)
+    # NEW: Tracks the format for the frontend (markdown, graph, flashcards, quiz)
     artifact_type = models.CharField(max_length=50, default='markdown') 
     
+    # NEW: Saves the user's interactive UI progress (checkboxes, completed nodes, etc.)
+    progress_state = models.JSONField(default=dict, blank=True, null=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

@@ -5,6 +5,7 @@ import json
 import urllib.request
 import traceback
 import re
+import threading
 from django.contrib.auth.models import User
 from django.db.models import Q
 from rest_framework import viewsets, status
@@ -21,6 +22,42 @@ from .ingestion import IngestionEngine
 from .vector_store import VectorStoreService
 from .ai_engine import AIEngine
 from .mongo_service import ChatMemoryService
+
+# --- NEW: Background Task to Auto-Generate All Artifacts on Upload ---
+def background_auto_generate(workspace_id, document_id, document_title):
+    try:
+        workspace = Workspace.objects.get(id=workspace_id)
+        
+        # Define the 4 default artifacts to automatically build
+        artifacts_to_create = [
+            ('markdown', f"Study Guide: {document_title}", f"Create a comprehensive study guide for {document_title}."),
+            ('graph', f"Concept Map: {document_title}", f"Map out the core concepts from {document_title}."),
+            ('flashcards', f"Flashcards: {document_title}", f"Create 5-8 interactive flashcards covering the key terms in {document_title}."),
+            ('quiz', f"Quiz: {document_title}", f"Create a 5-question multiple choice quiz testing knowledge from {document_title}.")
+        ]
+        
+        for art_type, title, prompt in artifacts_to_create:
+            try:
+                # Restrict the AI context ONLY to the newly uploaded document
+                content = AIEngine.generate_artifact(
+                    workspace_id=workspace_id,
+                    user_query=prompt,
+                    artifact_type=art_type,
+                    selected_doc_ids=[str(document_id)] 
+                )
+                
+                Artifact.objects.create(
+                    workspace=workspace,
+                    title=title,
+                    content=content,
+                    artifact_type=art_type
+                )
+                print(f"✅ Successfully auto-generated {art_type} for {document_title}")
+            except Exception as e:
+                print(f"❌ Auto-gen failed for {art_type}: {e}")
+                
+    except Exception as e:
+        print(f"❌ Background thread failed: {e}")
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -92,28 +129,23 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def generate_artifact(self, request, pk=None):
-        """
-        NEW: Generates a structured artifact using the AI Engine,
-        saves it to the SQLite database, and returns it to the frontend.
-        """
         workspace = self.get_object()
         prompt = request.data.get('prompt')
         title = request.data.get('title', 'Generated Artifact')
-        # Extract the requested type from the frontend (defaults to markdown)
         artifact_type = request.data.get('artifact_type', 'markdown')
+        selected_docs = request.data.get('selected_docs', None)
 
         if not prompt:
             return Response({"error": "A prompt is required to generate an artifact."}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # 1. Generate the content via Gemini based on the type
             generated_content = AIEngine.generate_artifact(
                 workspace_id=workspace.id,
                 user_query=prompt,
-                artifact_type=artifact_type
+                artifact_type=artifact_type,
+                selected_doc_ids=selected_docs
             )
             
-            # 2. Save it as a new Artifact record
             artifact = Artifact.objects.create(
                 workspace=workspace,
                 title=title,
@@ -191,6 +223,18 @@ class ArtifactViewSet(viewsets.ModelViewSet):
     queryset = Artifact.objects.all().order_by('-created_at')
     serializer_class = ArtifactSerializer
 
+    @action(detail=True, methods=['patch'])
+    def update_progress(self, request, pk=None):
+        try:
+            artifact = self.get_object()
+            progress_state = request.data.get('progress_state', {})
+            artifact.progress_state = progress_state
+            artifact.save()
+            return Response(ArtifactSerializer(artifact).data, status=status.HTTP_200_OK)
+        except Exception as e:
+            traceback.print_exc()
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class DocumentViewSet(viewsets.ModelViewSet):
     queryset = Document.objects.all().order_by('-created_at')
     serializer_class = DocumentSerializer
@@ -222,7 +266,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
                     chunks=chunks
                 )
         except Exception as e:
-            print(f"❌ Error processing Document {document.id}: {str(e)}")
+            print(f"  Error processing Document {document.id}: {str(e)}")
 
 class FileUploadView(APIView):
     permission_classes = [IsAuthenticated]
@@ -251,14 +295,26 @@ class FileUploadView(APIView):
                 video_id = video_id_match.group(1) if video_id_match else youtube_url[-11:]
                 
                 final_title = f"YouTube Video: {video_id}"
+                
+                # --- NEW: Robust Fallback Title Extraction for YouTube ---
                 try:
                     oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
-                    req = urllib.request.Request(oembed_url, headers={'User-Agent': 'Mozilla/5.0'})
+                    req = urllib.request.Request(oembed_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
                     with urllib.request.urlopen(req, timeout=3) as resp:
                         meta = json.loads(resp.read().decode('utf-8'))
                         final_title = meta.get('title', final_title)
                 except Exception:
-                    pass
+                    try:
+                        # Fallback to scraping the raw HTML if oEmbed fails
+                        html_url = f"https://www.youtube.com/watch?v={video_id}"
+                        html_req = urllib.request.Request(html_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(html_req, timeout=3) as html_resp:
+                            html = html_resp.read().decode('utf-8')
+                            title_match = re.search(r'<title>(.*?)</title>', html)
+                            if title_match:
+                                final_title = title_match.group(1).replace(' - YouTube', '').strip()
+                    except Exception:
+                        pass
 
                 chunks = IngestionEngine.process_youtube(youtube_url)
                 if not chunks:
@@ -300,7 +356,14 @@ class FileUploadView(APIView):
                     document_id=doc.id,
                     chunks=chunks
                 )
-                return Response({"message": f"Successfully indexed {len(chunks)} chunks!"}, status=status.HTTP_201_CREATED)
+                
+                # --- NEW: Trigger Auto-Generation Sequence in the Background ---
+                threading.Thread(
+                    target=background_auto_generate,
+                    args=(workspace.id, doc.id, final_title)
+                ).start()
+
+                return Response({"message": f"Successfully indexed {len(chunks)} chunks! Auto-generating artifacts in background..."}, status=status.HTTP_201_CREATED)
             else:
                 return Response({"error": "Failed to extract data."}, status=status.HTTP_400_BAD_REQUEST)
 

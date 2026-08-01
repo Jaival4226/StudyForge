@@ -1,15 +1,50 @@
 # workspaces/ai_engine.py
 
 import json
+import time
 import google.generativeai as genai
 from django.conf import settings
 from .vector_store import VectorStoreService
 from .mongo_service import ChatMemoryService
 
-genai.configure(api_key=settings.GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+# Load the array of keys (fallback to single key if array isn't defined)
+API_KEYS = getattr(settings, 'GEMINI_API_KEYS', [])
+if not API_KEYS and hasattr(settings, 'GEMINI_API_KEY'):
+    API_KEYS = [settings.GEMINI_API_KEY]
+
+# Global pointer to track which API key we are currently using
+current_key_index = 0
 
 class AIEngine:
+    @staticmethod
+    def _execute_with_fallback(system_prompt):
+        """
+        Executes the Gemini API call. If it hits a rate limit (429) or quota error,
+        it automatically rotates to the next API key and retries.
+        """
+        global current_key_index
+        attempts = 0
+        max_attempts = len(API_KEYS) * 2 # Allow rotating through all keys twice
+
+        while attempts < max_attempts:
+            try:
+                # Configure with the current key in the rotation
+                genai.configure(api_key=API_KEYS[current_key_index])
+                model = genai.GenerativeModel('gemini-2.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                response = model.generate_content(system_prompt)
+                return response.text
+            except Exception as e:
+                error_str = str(e).lower()
+                if "429" in error_str or "quota" in error_str or "exhausted" in error_str:
+                    print(f"  [AI Engine] API Key {current_key_index + 1} exhausted. Rotating to next key...")
+                    current_key_index = (current_key_index + 1) % len(API_KEYS)
+                    attempts += 1
+                    time.sleep(1) # Brief pause before retry
+                else:
+                    # If it's a completely different error (like a bad prompt), raise it
+                    raise e
+        raise Exception("All Gemini API keys have been exhausted or rate-limited.")
+
     @staticmethod
     def chat_with_workspace(workspace_id, user_query, user_id):
         context_results = VectorStoreService.query_workspace_context(
@@ -57,8 +92,7 @@ class AIEngine:
         Current User Query: {user_query}
         """
 
-        response = model.generate_content(system_prompt)
-        answer_text = response.text
+        answer_text = AIEngine._execute_with_fallback(system_prompt)
 
         mongo_service.save_message(workspace_id, user_id, role="user", text=user_query)
         mongo_service.save_message(workspace_id, user_id, role="ai", text=answer_text)
@@ -66,11 +100,12 @@ class AIEngine:
         return {"answer": answer_text, "sources": []}
 
     @staticmethod
-    def generate_artifact(workspace_id, user_query, artifact_type='markdown'):
+    def generate_artifact(workspace_id, user_query, artifact_type='markdown', selected_doc_ids=None):
         context_results = VectorStoreService.query_workspace_context(
             workspace_id=workspace_id, 
             query_text=user_query, 
-            n_results=35
+            n_results=35,
+            selected_doc_ids=selected_doc_ids 
         )
 
         formatted_context = "WORKSPACE DOCUMENTS:\n\n"
@@ -96,10 +131,10 @@ class AIEngine:
                       "summary": "A punchy 1-2 sentence overview of the concept.",
                       "details": "A deeply detailed, multi-paragraph explanation of how this works, why it matters, and practical examples.",
                       "resources": [
-                        {{ 
+                        {{
                            "title": "Related Video Explanation", 
-                            "type": "video", 
-                            "link": "[Enter exact YouTube ID|Timestamp from source tag if available, or generate a high quality external search query]"
+                           "type": "video", 
+                           "link": "[Enter exact YouTube ID|Timestamp from source tag if available, or generate a high quality external search query]"
                         }}
                       ]
                   }},
@@ -111,6 +146,7 @@ class AIEngine:
                 {{ "id": "e1-2", "source": "1", "target": "2", "animated": true, "label": "leads to" }}
               ]
             }}
+
             Ensure positions are spread out hierarchically (e.g., y: 0, y: 150, y: 300) so nodes do not overlap in the React Flow UI.
             
             {formatted_context}
@@ -129,11 +165,10 @@ class AIEngine:
                 "tag": "Subtopic Category"
               }}
             ]
-            
+
             {formatted_context}
             Topic Request: {user_query}
             """
-        # --- NEW: Added strict JSON schema for Interactive Quizzes ---
         elif artifact_type == 'quiz':
             system_prompt = f"""
             You are an expert educator. Generate a highly interactive 5-question multiple-choice quiz based ONLY on the workspace context.
@@ -149,18 +184,32 @@ class AIEngine:
               }}
             ]
             
+            CRITICAL RULES:
+            1. The "correct_answer" string MUST perfectly and exactly match one of the strings inside the "options" array. Do not alter punctuation.
+            2. Do NOT mention "Chunk X", "Document Y", or use technical database references in your explanations. Write naturally as a teacher.
+            
             {formatted_context}
             Topic Request: {user_query}
             """
         else:
+            # --- FIXED: Strict formatting and citation rules added back to the Markdown prompt ---
             system_prompt = f"""
             You are an elite Academic Content Generator. 
             Create a highly structured, standalone markdown document based ONLY on the provided workspace context.
             Include detailed explanations, formatted code blocks (if applicable), and avoid all conversational filler.
+
+            CRITICAL CITATION RULES:
+            1. You MUST cite your sources using the EXACT string provided in the 'SOURCE_TAG'.
+            2. Format citations exactly like this: [videoId|00:12:34] or [filename.pdf|Page 1].
+            3. NEVER group multiple citations together.
+            4. Do NOT make them standard markdown web links (e.g. do not write [00:12:34](https://youtube...)). Just output the raw bracketed tag exactly as provided.
             
+            FORMATTING RULES:
+            1. Use proper markdown spacing. Leave a blank empty line before and after headings, lists, and code blocks.
+            2. Ensure inline code `ticks` have spaces around them. Do not squish words together (e.g. write `the Employee class` not `theEmployeeclass`).
+
             {formatted_context}
             User Artifact Request: {user_query}
             """
 
-        response = model.generate_content(system_prompt)
-        return response.text
+        return AIEngine._execute_with_fallback(system_prompt)

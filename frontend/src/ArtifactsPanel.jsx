@@ -1,7 +1,11 @@
 // src/ArtifactsPanel.jsx
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { FileText, Plus, X, Sparkles, ChevronLeft, Network, CreditCard, HelpCircle, CheckCircle2, RotateCw, AlertCircle, ArrowRight, BookOpen, Trash2, CheckSquare } from 'lucide-react';
+import { 
+    FileText, Plus, X, Sparkles, ChevronLeft, Network, CreditCard, 
+    HelpCircle, CheckCircle2, RotateCw, AlertCircle, ArrowRight, 
+    BookOpen, Trash2, CheckSquare, Video, Square, ListChecks 
+} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -18,39 +22,192 @@ const parseJsonContent = (raw) => {
     }
 };
 
+const preprocessMarkdown = (text) => {
+    if (!text) return '';
+    let processed = text.replace(/\[([a-zA-Z0-9_-]{11})\|([0-9:]+)\]/g, (match, id, time) => {
+        return `[${time}](yt:${id}:${encodeURIComponent(time)})`;
+    });
+    processed = processed.replace(/\[(.*?\.pdf)\|([^\]]+)\]/g, (match, file, page) => {
+        return `[${page}](pdf:${encodeURIComponent(file)}:${encodeURIComponent(page)})`;
+    });
+    return processed;
+};
+
 // ==========================================
-// EXTRACTED VIEW RENDERERS (Prevents State Wiping)
+// VIEW RENDERERS
 // ==========================================
 
-const KnowledgeGraphViewer = ({ content, onResourceClick }) => {
-    const data = parseJsonContent(content);
-    const [nodes, setNodes] = useState(data?.nodes || []);
+const MarkdownViewer = ({ artifact, onProgressUpdate, onResourceClick }) => {
+    const content = preprocessMarkdown(artifact.content);
+    const progress = artifact.progress_state || { headings: [] };
+    const completedHeadings = progress.headings || [];
+    
+    const totalHeadings = (content.match(/^## /gm) || []).length || 1;
+    const percent = Math.min(100, Math.round((completedHeadings.length / totalHeadings) * 100));
+
+    const toggleHeading = (headingId) => {
+        const newHeadings = completedHeadings.includes(headingId) 
+            ? completedHeadings.filter(id => id !== headingId)
+            : [...completedHeadings, headingId];
+        onProgressUpdate(artifact.id, { ...progress, headings: newHeadings });
+    };
+
+    return (
+        <div className="flex flex-col h-full relative bg-[#0B0D17]">
+            <div className="sticky top-0 z-20 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 p-4 flex items-center justify-between shadow-lg">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center">
+                    <ListChecks className="w-4 h-4 mr-2 text-blue-500" /> Guide Progress
+                </span>
+                <div className="flex items-center flex-1 max-w-md mx-6">
+                    <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500 transition-all duration-500 ease-out" style={{ width: `${percent}%` }}></div>
+                    </div>
+                </div>
+                <span className="text-sm font-mono font-bold text-emerald-400">{percent}%</span>
+            </div>
+            
+            <div className="p-10 overflow-y-auto h-full max-w-4xl mx-auto w-full">
+                <ReactMarkdown
+                    components={{
+                        h1: ({ node, ...props }) => <h1 className="text-3xl font-extrabold text-white mb-8 border-b border-gray-800 pb-4" {...props} />,
+                        h2: ({ node, children, ...props }) => {
+                            const headingText = children?.toString() || Math.random().toString();
+                            const isCompleted = completedHeadings.includes(headingText);
+                            return (
+                                <div className="flex items-center justify-between mt-12 mb-6 group border-b border-gray-800/50 pb-3">
+                                    <h2 className={`text-2xl font-bold transition-colors duration-300 ${isCompleted ? 'text-emerald-500/70 line-through' : 'text-blue-400'}`} {...props}>
+                                        {children}
+                                    </h2>
+                                    <button 
+                                        onClick={() => toggleHeading(headingText)}
+                                        className={`p-2 rounded-xl transition-all duration-200 ${isCompleted ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800' : 'bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-700'}`}
+                                        title="Mark concept as mastered"
+                                    >
+                                        {isCompleted ? <CheckSquare className="w-5 h-5" /> : <Square className="w-5 h-5" />}
+                                    </button>
+                                </div>
+                            )
+                        },
+                        h3: ({ node, ...props }) => <h3 className="text-xl font-semibold text-gray-200 mt-8 mb-4" {...props} />,
+                        p: ({ node, ...props }) => <p className="mb-6 text-gray-300 leading-loose text-base" {...props} />,
+                        ul: ({ node, ...props }) => <ul className="list-disc mb-6 space-y-3 text-gray-300 text-base pl-8" {...props} />,
+                        ol: ({ node, ...props }) => <ol className="list-decimal mb-6 space-y-3 text-gray-300 text-base pl-8" {...props} />,
+                        li: ({ node, ...props }) => <li className="pl-2" {...props} />,
+                        strong: ({ node, ...props }) => <strong className="font-bold text-white bg-gray-800/50 px-1 rounded" {...props} />,
+                        code: ({ node, inline, ...props }) =>
+                            inline ? (
+                                <code className="bg-gray-800 text-blue-300 px-2 py-1 rounded text-sm font-mono border border-gray-700" {...props} />
+                            ) : (
+                                <pre className="bg-[#050505] border border-gray-800 rounded-xl p-6 mb-6 overflow-x-auto shadow-2xl">
+                                    <code className="text-gray-300 text-sm font-mono leading-relaxed" {...props} />
+                                </pre>
+                            ),
+                        a: ({ node, href, children, ...props }) => {
+                            if (href?.startsWith('yt:')) {
+                                const decodedHref = decodeURIComponent(href);
+                                const parts = decodedHref.split(':');
+                                const timestamp = parts.slice(2).join(':'); 
+                                return (
+                                    <button
+                                        onClick={(e) => { e.preventDefault(); onResourceClick && onResourceClick(decodedHref); }}
+                                        className="inline-flex items-center bg-red-900/30 hover:bg-red-800/40 text-red-400 border border-red-800 px-2 py-0.5 rounded text-xs mx-1 font-mono transition-colors cursor-pointer"
+                                        title="Jump to video timestamp"
+                                    >
+                                        <Video className="w-3 h-3 mr-1" />
+                                        {timestamp}
+                                    </button>
+                                );
+                            }
+                            if (href?.startsWith('pdf:')) {
+                                const decodedHref = decodeURIComponent(href);
+                                const parts = decodedHref.split(':');
+                                const file = parts[1];
+                                const page = parts.slice(2).join(':');
+                                return (
+                                    <button
+                                        onClick={(e) => { e.preventDefault(); onResourceClick && onResourceClick(decodedHref); }}
+                                        className="inline-flex items-center bg-blue-900/30 hover:bg-blue-800/40 text-blue-400 border border-blue-800 px-2 py-0.5 rounded text-xs mx-1 font-mono transition-colors cursor-pointer"
+                                        title={`Open ${file}`}
+                                    >
+                                        <FileText className="w-3 h-3 mr-1" />
+                                        {page}
+                                    </button>
+                                );
+                            }
+                            return <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noreferrer" {...props}>{children}</a>;
+                        }
+                    }}
+                >
+                    {content}
+                </ReactMarkdown>
+            </div>
+        </div>
+    );
+};
+
+const KnowledgeGraphViewer = ({ artifact, onProgressUpdate, onResourceClick }) => {
+    const data = parseJsonContent(artifact.content);
+    const progress = artifact.progress_state || { nodes: [] };
+    const completedNodes = progress.nodes || [];
+
+    const getStyledNodes = () => {
+        return (data?.nodes || []).map(n => ({
+            ...n,
+            style: completedNodes.includes(n.id) 
+                ? { backgroundColor: '#064e3b', borderColor: '#10b981', color: '#fff', borderRadius: '12px', padding: '15px', fontWeight: 'bold', boxShadow: '0 4px 20px rgba(16, 185, 129, 0.2)' } 
+                : { backgroundColor: '#1f2937', borderColor: '#4b5563', color: '#fff', borderRadius: '12px', padding: '15px' }
+        }));
+    };
+
+    const [nodes, setNodes] = useState(getStyledNodes());
     const [edges, setEdges] = useState(data?.edges || []);
     const [selectedNodeData, setSelectedNodeData] = useState(null);
+
+    useEffect(() => {
+        setNodes(getStyledNodes());
+    }, [artifact.progress_state]);
 
     const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
     const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
 
     if (!data || !data.nodes) return <div className="p-6 text-red-400">Failed to parse Graph structure. Try generating again.</div>;
 
-    return (
-        <div className="w-full h-full relative bg-[#0f111a]">
-            <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onNodeClick={(_, node) => setSelectedNodeData(node.data)}
-                fitView
-                className="dark"
-            >
-                <Background color="#333" gap={16} />
-                <Controls className="bg-gray-800 fill-white" />
-            </ReactFlow>
+    const percent = Math.min(100, Math.round((completedNodes.length / (nodes.length || 1)) * 100));
 
-            <div className="absolute top-4 left-4 bg-gray-900/80 backdrop-blur border border-gray-700 px-4 py-2 rounded-lg text-xs font-mono text-gray-300 pointer-events-none z-10 shadow-lg">
-                <Network className="inline w-4 h-4 mr-2 text-purple-400" />
-                Drag nodes to arrange. Click a node to deep-dive.
+    const toggleNodeCompletion = (nodeId) => {
+        const newNodes = completedNodes.includes(nodeId)
+            ? completedNodes.filter(id => id !== nodeId)
+            : [...completedNodes, nodeId];
+        onProgressUpdate(artifact.id, { ...progress, nodes: newNodes });
+    };
+
+    return (
+        <div className="w-full h-full relative bg-[#0f111a] flex flex-col">
+            <div className="absolute top-0 w-full z-10 bg-gray-900/80 backdrop-blur-md border-b border-gray-800 p-3 flex items-center justify-between shadow-lg">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center">
+                    <Network className="w-4 h-4 mr-2 text-purple-400" /> Map Mastery
+                </span>
+                <div className="flex items-center flex-1 max-w-md mx-6">
+                    <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
+                        <div className="h-full bg-emerald-500 transition-all duration-500 ease-out" style={{ width: `${percent}%` }}></div>
+                    </div>
+                </div>
+                <span className="text-sm font-mono font-bold text-emerald-400">{percent}%</span>
+            </div>
+
+            <div className="flex-1 mt-12">
+                <ReactFlow
+                    nodes={nodes}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onNodeClick={(_, node) => setSelectedNodeData({ ...node.data, id: node.id })}
+                    fitView
+                    className="dark"
+                >
+                    <Background color="#333" gap={16} />
+                    <Controls className="bg-gray-800 fill-white" />
+                </ReactFlow>
             </div>
 
             <AnimatePresence>
@@ -60,7 +217,7 @@ const KnowledgeGraphViewer = ({ content, onResourceClick }) => {
                         animate={{ x: 0, opacity: 1 }}
                         exit={{ x: '100%', opacity: 0 }}
                         transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                        className="absolute top-0 right-0 w-[450px] h-full bg-gray-900/95 backdrop-blur-xl border-l border-gray-700 shadow-2xl z-50 flex flex-col"
+                        className="absolute top-0 right-0 w-[450px] h-full bg-gray-900/95 backdrop-blur-xl border-l border-gray-700 shadow-2xl z-50 flex flex-col pt-12"
                     >
                         <div className="p-6 border-b border-gray-800 flex justify-between items-start">
                             <div>
@@ -76,6 +233,14 @@ const KnowledgeGraphViewer = ({ content, onResourceClick }) => {
                         </div>
 
                         <div className="p-6 overflow-y-auto flex-1">
+                            <button 
+                                onClick={() => toggleNodeCompletion(selectedNodeData.id)}
+                                className={`w-full mb-8 py-3 rounded-xl font-bold transition-all flex items-center justify-center ${completedNodes.includes(selectedNodeData.id) ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800' : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'}`}
+                            >
+                                {completedNodes.includes(selectedNodeData.id) ? <CheckCircle2 className="w-5 h-5 mr-2" /> : <Square className="w-5 h-5 mr-2" />}
+                                {completedNodes.includes(selectedNodeData.id) ? 'Node Mastered' : 'Mark as Mastered'}
+                            </button>
+
                             <div className="prose prose-invert prose-sm">
                                 <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-3">Deep Dive</h4>
                                 <p className="text-gray-300 leading-relaxed text-sm mb-8 whitespace-pre-wrap">
@@ -91,7 +256,7 @@ const KnowledgeGraphViewer = ({ content, onResourceClick }) => {
                                             <div
                                                 key={idx}
                                                 onClick={(e) => {
-                                                    e.stopPropagation(); // Prevent bleeding into the ReactFlow canvas
+                                                    e.stopPropagation();
                                                     onResourceClick && onResourceClick(res.link);
                                                 }}
                                                 className="group bg-gray-950 border border-gray-800 hover:border-purple-500/50 p-4 rounded-xl transition-colors cursor-pointer flex flex-col"
@@ -116,7 +281,7 @@ const KnowledgeGraphViewer = ({ content, onResourceClick }) => {
     );
 };
 
-const FlashcardsViewer = ({ content, artifactTitle, triggerQuizGeneration }) => {
+const FlashcardsViewer = ({ content, onSwitchToQuiz }) => {
     const cards = parseJsonContent(content);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isFlipped, setIsFlipped] = useState(false);
@@ -161,7 +326,6 @@ const FlashcardsViewer = ({ content, artifactTitle, triggerQuizGeneration }) => 
 
     return (
         <div className="flex flex-col items-center h-full p-8 bg-[#0B0D17] relative">
-
             <div className="w-full max-w-2xl mb-10">
                 <div className="flex justify-between text-xs font-mono text-gray-500 mb-2">
                     <span>STUDY SET PROGRESS</span>
@@ -224,7 +388,7 @@ const FlashcardsViewer = ({ content, artifactTitle, triggerQuizGeneration }) => 
                                 <BookOpen className="w-10 h-10 text-white" />
                             </div>
                             <h2 className="text-3xl font-bold text-white mb-3">Deck Complete!</h2>
-                            <p className="text-gray-300 mb-8 max-w-sm">You have reviewed all the flashcards in this set. Are you ready to test your knowledge with a generated quiz?</p>
+                            <p className="text-gray-300 mb-8 max-w-sm">You have reviewed all the flashcards in this set. Are you ready to test your knowledge with the linked quiz?</p>
 
                             <div className="flex space-x-4">
                                 <button
@@ -238,10 +402,10 @@ const FlashcardsViewer = ({ content, artifactTitle, triggerQuizGeneration }) => 
                                     Study Again
                                 </button>
                                 <button
-                                    onClick={() => triggerQuizGeneration(artifactTitle)}
-                                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors flex items-center shadow-lg shadow-indigo-900/50"
+                                    onClick={onSwitchToQuiz}
+                                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-colors flex items-center shadow-lg shadow-emerald-900/50"
                                 >
-                                    <Sparkles className="w-5 h-5 mr-2" /> Generate Quiz
+                                    <CheckSquare className="w-5 h-5 mr-2" /> Take Quiz
                                 </button>
                             </div>
                         </motion.div>
@@ -284,8 +448,6 @@ const FlashcardsViewer = ({ content, artifactTitle, triggerQuizGeneration }) => 
     );
 };
 
-// --- NEW: Interactive Quiz Viewer ---
-// --- Interactive Quiz Viewer with Shuffled Options ---
 const QuizViewer = ({ content }) => {
     const [questions, setQuestions] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
@@ -294,7 +456,6 @@ const QuizViewer = ({ content }) => {
     const [score, setScore] = useState(0);
     const [isComplete, setIsComplete] = useState(false);
 
-    // Array shuffle helper (Fisher-Yates)
     const shuffleArray = (array) => {
         const shuffled = [...array];
         for (let i = shuffled.length - 1; i > 0; i--) {
@@ -304,7 +465,6 @@ const QuizViewer = ({ content }) => {
         return shuffled;
     };
 
-    // Pre-process questions to shuffle option order on initial load
     const loadAndShuffleQuestions = useCallback(() => {
         const parsed = parseJsonContent(content);
         if (parsed && Array.isArray(parsed)) {
@@ -323,9 +483,11 @@ const QuizViewer = ({ content }) => {
     if (!questions || questions.length === 0) return <div className="p-6 text-red-400">Failed to parse Quiz structure.</div>;
     const currentQ = questions[currentIndex];
 
+    const checkIsCorrect = (opt) => String(opt).trim() === String(currentQ.correct_answer).trim();
+
     const handleSubmit = () => {
         setIsSubmitted(true);
-        if (selectedOption === currentQ.correct_answer) {
+        if (checkIsCorrect(selectedOption)) {
             setScore(s => s + 1);
         }
     };
@@ -341,7 +503,7 @@ const QuizViewer = ({ content }) => {
     };
 
     const handleRetake = () => {
-        loadAndShuffleQuestions(); // Re-shuffle options for a fresh attempt
+        loadAndShuffleQuestions();
         setCurrentIndex(0);
         setScore(0);
         setIsComplete(false);
@@ -383,15 +545,18 @@ const QuizViewer = ({ content }) => {
                 <div className="space-y-3 mb-8">
                     {currentQ.options.map((opt, idx) => {
                         let btnClass = "w-full text-left px-6 py-4 rounded-xl border transition-all text-base font-medium cursor-pointer ";
+                        
+                        const isCorrect = checkIsCorrect(opt);
+                        const isSelected = selectedOption === opt;
 
                         if (!isSubmitted) {
-                            btnClass += selectedOption === opt
+                            btnClass += isSelected
                                 ? "bg-blue-600/20 border-blue-500 text-blue-100"
                                 : "bg-gray-800 border-gray-700 hover:border-gray-500 text-gray-300";
                         } else {
-                            if (opt === currentQ.correct_answer) {
+                            if (isCorrect) {
                                 btnClass += "bg-green-900/30 border-green-500 text-green-200";
-                            } else if (opt === selectedOption) {
+                            } else if (isSelected) {
                                 btnClass += "bg-red-900/30 border-red-500 text-red-200";
                             } else {
                                 btnClass += "bg-gray-800 border-gray-700 text-gray-500 opacity-50 cursor-not-allowed";
@@ -416,11 +581,11 @@ const QuizViewer = ({ content }) => {
                         <motion.div
                             initial={{ opacity: 0, y: 10 }}
                             animate={{ opacity: 1, y: 0 }}
-                            className={`p-6 rounded-xl border mb-8 ${selectedOption === currentQ.correct_answer ? 'bg-green-900/20 border-green-800' : 'bg-red-900/20 border-red-800'}`}
+                            className={`p-6 rounded-xl border mb-8 ${checkIsCorrect(selectedOption) ? 'bg-green-900/20 border-green-800' : 'bg-red-900/20 border-red-800'}`}
                         >
-                            <h3 className={`font-bold mb-2 flex items-center ${selectedOption === currentQ.correct_answer ? 'text-green-400' : 'text-red-400'}`}>
-                                {selectedOption === currentQ.correct_answer ? <CheckCircle2 className="w-5 h-5 mr-2" /> : <X className="w-5 h-5 mr-2" />}
-                                {selectedOption === currentQ.correct_answer ? 'Correct!' : 'Incorrect'}
+                            <h3 className={`font-bold mb-2 flex items-center ${checkIsCorrect(selectedOption) ? 'text-green-400' : 'text-red-400'}`}>
+                                {checkIsCorrect(selectedOption) ? <CheckCircle2 className="w-5 h-5 mr-2" /> : <X className="w-5 h-5 mr-2" />}
+                                {checkIsCorrect(selectedOption) ? 'Correct!' : 'Incorrect'}
                             </h3>
                             <p className="text-gray-300 text-sm leading-relaxed">{currentQ.explanation}</p>
                         </motion.div>
@@ -450,22 +615,34 @@ const QuizViewer = ({ content }) => {
     );
 };
 
-
 // ==========================================
 // MAIN PANEL RENDER
 // ==========================================
 
 export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
     const [artifacts, setArtifacts] = useState([]);
+    const [documents, setDocuments] = useState([]); 
+    const [selectedDocs, setSelectedDocs] = useState([]); 
+
+    // --- NEW: Interactive Selection State ---
+    const artifactTypeConfig = [
+        { id: 'markdown', label: 'Guide', icon: FileText, activeClass: 'bg-blue-900/40 text-blue-400 border-blue-800/50 shadow-md' },
+        { id: 'graph', label: 'Map', icon: Network, activeClass: 'bg-purple-900/40 text-purple-400 border-purple-800/50 shadow-md' },
+        { id: 'flashcards', label: 'Cards', icon: CreditCard, activeClass: 'bg-indigo-900/40 text-indigo-400 border-indigo-800/50 shadow-md' },
+        { id: 'quiz', label: 'Quiz', icon: CheckSquare, activeClass: 'bg-emerald-900/40 text-emerald-400 border-emerald-800/50 shadow-md' }
+    ];
+    // Start with all selected
+    const [selectedTypes, setSelectedTypes] = useState(artifactTypeConfig.map(t => t.id));
+
     const [isGenerating, setIsGenerating] = useState(false);
     const [showForm, setShowForm] = useState(false);
     const [prompt, setPrompt] = useState('');
     const [title, setTitle] = useState('');
-    const [artifactType, setArtifactType] = useState('markdown');
     const [viewingArtifact, setViewingArtifact] = useState(null);
 
     useEffect(() => {
         fetchArtifacts();
+        fetchDocuments();
     }, [workspaceId]);
 
     const fetchArtifacts = async () => {
@@ -483,36 +660,90 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
         }
     };
 
-    const handleGenerate = async (e) => {
-        e.preventDefault();
-        if (!prompt) return;
-
-        setIsGenerating(true);
+    const fetchDocuments = async () => {
         try {
             const token = localStorage.getItem('auth_token');
-            const response = await fetch(`http://localhost:8000/api/workspaces/${workspaceId}/generate_artifact/`, {
-                method: 'POST',
+            const response = await fetch(`http://localhost:8000/api/workspaces/${workspaceId}/list_documents/`, {
+                headers: { 'Authorization': `Token ${token}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setDocuments(data.documents || []);
+                setSelectedDocs(data.documents.map(d => d.id.toString()));
+            }
+        } catch (error) {
+            console.error("Failed to fetch documents", error);
+        }
+    };
+
+    const handleProgressUpdate = async (artifactId, newProgress) => {
+        setArtifacts(prev => prev.map(a => a.id === artifactId ? { ...a, progress_state: newProgress } : a));
+        if (viewingArtifact?.id === artifactId) {
+            setViewingArtifact(prev => ({ ...prev, progress_state: newProgress }));
+        }
+
+        try {
+            const token = localStorage.getItem('auth_token');
+            await fetch(`http://localhost:8000/api/artifacts/${artifactId}/update_progress/`, {
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Token ${token}`
                 },
-                body: JSON.stringify({
-                    prompt,
-                    title: title || 'Generated Artifact',
-                    artifact_type: artifactType
-                })
+                body: JSON.stringify({ progress_state: newProgress })
             });
-
-            if (response.ok) {
-                const newArtifact = await response.json();
-                setArtifacts(prev => [newArtifact, ...prev]);
-                setShowForm(false);
-                setPrompt('');
-                setTitle('');
-                setViewingArtifact(newArtifact);
-            }
         } catch (error) {
-            console.error("Failed to generate artifact", error);
+            console.error("Failed to save progress to database", error);
+        }
+    };
+
+    const toggleArtifactType = (typeId) => {
+        setSelectedTypes(prev => 
+            prev.includes(typeId) ? prev.filter(t => t !== typeId) : [...prev, typeId]
+        );
+    };
+
+    const handleGenerate = async (e) => {
+        e.preventDefault();
+        if (!prompt || selectedTypes.length === 0) return;
+
+        setIsGenerating(true);
+        try {
+            const token = localStorage.getItem('auth_token');
+            const baseTitle = title || 'Generated Study Set';
+            
+            // Loop through ONLY the selected types
+            const generatePromises = selectedTypes.map(type => 
+                fetch(`http://localhost:8000/api/workspaces/${workspaceId}/generate_artifact/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Token ${token}`
+                    },
+                    body: JSON.stringify({
+                        prompt,
+                        title: baseTitle, 
+                        artifact_type: type,
+                        selected_docs: selectedDocs 
+                    })
+                }).then(res => res.json())
+            );
+
+            const newArtifacts = await Promise.all(generatePromises);
+            
+            setArtifacts(prev => [...newArtifacts, ...prev]);
+            setShowForm(false);
+            setPrompt('');
+            setTitle('');
+            
+            if (newArtifacts.length > 0) {
+                // Default to opening flashcards if generated, else the first thing they made
+                const targetArtifact = newArtifacts.find(a => a.artifact_type === 'flashcards') || newArtifacts[0];
+                setViewingArtifact(targetArtifact);
+            }
+
+        } catch (error) {
+            console.error("Failed to generate artifacts", error);
         } finally {
             setIsGenerating(false);
         }
@@ -538,45 +769,21 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
         }
     };
 
-    // --- AUTOMATED QUIZ TRIGGER PIPELINE ---
-    const triggerQuizGeneration = async (sourceTitle) => {
-        const quizTitle = `Quiz: ${sourceTitle}`;
-        const quizPrompt = `Generate a challenging 5-question multiple choice quiz to test my knowledge on the concepts covered in: ${sourceTitle}.`;
+    const handleSwitchToQuiz = (currentArtifactTitle) => {
+        let targetTitle = currentArtifactTitle;
+        if (targetTitle.startsWith('Flashcards: ')) {
+            targetTitle = targetTitle.replace('Flashcards: ', 'Quiz: ');
+        }
 
-        setViewingArtifact(null);
-        setArtifactType('quiz'); // Requests JSON from the new backend schema
-        setTitle(quizTitle);
-        setPrompt(quizPrompt);
-        setShowForm(true);
-        setIsGenerating(true);
+        const linkedQuiz = artifacts.find(a => 
+            a.artifact_type === 'quiz' && 
+            (a.title === targetTitle || a.title === currentArtifactTitle)
+        );
 
-        try {
-            const token = localStorage.getItem('auth_token');
-            const response = await fetch(`http://localhost:8000/api/workspaces/${workspaceId}/generate_artifact/`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Token ${token}`
-                },
-                body: JSON.stringify({
-                    prompt: quizPrompt,
-                    title: quizTitle,
-                    artifact_type: 'quiz'
-                })
-            });
-
-            if (response.ok) {
-                const newArtifact = await response.json();
-                setArtifacts(prev => [newArtifact, ...prev]);
-                setShowForm(false);
-                setPrompt('');
-                setTitle('');
-                setViewingArtifact(newArtifact);
-            }
-        } catch (error) {
-            console.error("Failed to auto-generate quiz", error);
-        } finally {
-            setIsGenerating(false);
+        if (linkedQuiz) {
+            setViewingArtifact(linkedQuiz);
+        } else {
+            alert("Quiz not found! You might not have generated one with this set.");
         }
     };
 
@@ -584,6 +791,10 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
         const isGraph = viewingArtifact.artifact_type === 'graph';
         const isFlashcard = viewingArtifact.artifact_type === 'flashcards';
         const isQuiz = viewingArtifact.artifact_type === 'quiz';
+
+        const processedContent = viewingArtifact.artifact_type === 'markdown' 
+            ? preprocessMarkdown(viewingArtifact.content) 
+            : viewingArtifact.content;
 
         return (
             <div className="flex flex-col h-full bg-[#0B0D17] rounded-xl border border-gray-800 overflow-hidden shadow-2xl">
@@ -606,36 +817,16 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
 
                 <div className="flex-1 overflow-hidden relative">
                     {isGraph ? (
-                        <KnowledgeGraphViewer content={viewingArtifact.content} onResourceClick={onResourceClick} />
+                        <KnowledgeGraphViewer artifact={viewingArtifact} onProgressUpdate={handleProgressUpdate} onResourceClick={onResourceClick} />
                     ) : isFlashcard ? (
-                        <FlashcardsViewer content={viewingArtifact.content} artifactTitle={viewingArtifact.title} triggerQuizGeneration={triggerQuizGeneration} />
+                        <FlashcardsViewer 
+                            content={viewingArtifact.content} 
+                            onSwitchToQuiz={() => handleSwitchToQuiz(viewingArtifact.title)} 
+                        />
                     ) : isQuiz ? (
                         <QuizViewer content={viewingArtifact.content} />
                     ) : (
-                        <div className="p-10 overflow-y-auto h-full max-w-4xl mx-auto">
-                            <ReactMarkdown
-                                components={{
-                                    h1: ({ node, ...props }) => <h1 className="text-3xl font-extrabold text-white mb-8 border-b border-gray-800 pb-4" {...props} />,
-                                    h2: ({ node, ...props }) => <h2 className="text-2xl font-bold text-blue-400 mt-10 mb-6" {...props} />,
-                                    h3: ({ node, ...props }) => <h3 className="text-xl font-semibold text-gray-200 mt-8 mb-4" {...props} />,
-                                    p: ({ node, ...props }) => <p className="mb-6 text-gray-300 leading-loose text-base" {...props} />,
-                                    ul: ({ node, ...props }) => <ul className="list-disc mb-6 space-y-3 text-gray-300 text-base pl-8" {...props} />,
-                                    ol: ({ node, ...props }) => <ol className="list-decimal mb-6 space-y-3 text-gray-300 text-base pl-8" {...props} />,
-                                    li: ({ node, ...props }) => <li className="pl-2" {...props} />,
-                                    strong: ({ node, ...props }) => <strong className="font-bold text-white bg-gray-800/50 px-1 rounded" {...props} />,
-                                    code: ({ node, inline, ...props }) =>
-                                        inline ? (
-                                            <code className="bg-gray-800 text-blue-300 px-2 py-1 rounded text-sm font-mono border border-gray-700" {...props} />
-                                        ) : (
-                                            <pre className="bg-[#050505] border border-gray-800 rounded-xl p-6 mb-6 overflow-x-auto shadow-2xl">
-                                                <code className="text-gray-300 text-sm font-mono leading-relaxed" {...props} />
-                                            </pre>
-                                        )
-                                }}
-                            >
-                                {viewingArtifact.content}
-                            </ReactMarkdown>
-                        </div>
+                        <MarkdownViewer artifact={viewingArtifact} onProgressUpdate={handleProgressUpdate} onResourceClick={onResourceClick} />
                     )}
                 </div>
             </div>
@@ -661,40 +852,65 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
                 {showForm && (
                     <form onSubmit={handleGenerate} className="bg-gray-900 p-6 rounded-2xl border border-gray-700 mb-8 shadow-2xl animate-in fade-in slide-in-from-top-4">
 
-                        <div className="flex space-x-3 mb-6 bg-[#0B0D17] p-1.5 rounded-xl border border-gray-800">
-                            <button
-                                type="button"
-                                onClick={() => setArtifactType('markdown')}
-                                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center ${artifactType === 'markdown' ? 'bg-blue-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
-                            >
-                                <FileText className="w-4 h-4 mr-2" /> Guide
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setArtifactType('graph')}
-                                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center ${artifactType === 'graph' ? 'bg-purple-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
-                            >
-                                <Network className="w-4 h-4 mr-2" /> Map
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setArtifactType('flashcards')}
-                                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center ${artifactType === 'flashcards' ? 'bg-indigo-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
-                            >
-                                <CreditCard className="w-4 h-4 mr-2" /> Flashcards
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setArtifactType('quiz')}
-                                className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all flex items-center justify-center ${artifactType === 'quiz' ? 'bg-green-600 text-white shadow-md' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800'}`}
-                            >
-                                <CheckSquare className="w-4 h-4 mr-2" /> Quiz
-                            </button>
+                        {/* --- NEW: Interactive Toggle Buttons for Artifact Selection --- */}
+                        <div className="mb-4">
+                            <div className="flex justify-between items-end mb-3">
+                                <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block">Select Artifacts to Generate</label>
+                                <button 
+                                    type="button" 
+                                    onClick={() => setSelectedTypes(selectedTypes.length === 4 ? [] : ['markdown', 'graph', 'flashcards', 'quiz'])}
+                                    className="text-xs font-bold text-blue-500 hover:text-blue-400"
+                                >
+                                    {selectedTypes.length === 4 ? 'Deselect All' : 'Select All'}
+                                </button>
+                            </div>
+                            <div className="flex space-x-3 bg-[#0B0D17] p-1.5 rounded-xl border border-gray-800">
+                                {artifactTypeConfig.map(type => {
+                                    const isSelected = selectedTypes.includes(type.id);
+                                    const Icon = type.icon;
+                                    return (
+                                        <button
+                                            key={type.id}
+                                            type="button"
+                                            onClick={() => toggleArtifactType(type.id)}
+                                            className={`flex-1 py-2.5 text-xs font-bold rounded-lg flex items-center justify-center transition-all ${
+                                                isSelected 
+                                                    ? type.activeClass 
+                                                    : 'text-gray-500 border border-transparent hover:bg-gray-800 hover:text-gray-300'
+                                            }`}
+                                        >
+                                            <Icon className="w-3.5 h-3.5 mr-1.5" /> {type.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="mb-6 mt-6">
+                            <label className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3 block">Filter Source Context</label>
+                            <div className="max-h-32 overflow-y-auto bg-gray-950 border border-gray-800 rounded-xl p-3 space-y-1">
+                                {documents.map(doc => (
+                                    <label key={doc.id} className="flex items-center space-x-3 p-2 hover:bg-gray-800 rounded-lg cursor-pointer text-sm text-gray-300 transition-colors">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={selectedDocs.includes(doc.id.toString())}
+                                            onChange={(e) => {
+                                                const idStr = doc.id.toString();
+                                                if(e.target.checked) setSelectedDocs([...selectedDocs, idStr]);
+                                                else setSelectedDocs(selectedDocs.filter(id => id !== idStr));
+                                            }}
+                                            className="w-4 h-4 rounded border-gray-700 text-blue-600 bg-gray-900 focus:ring-0 cursor-pointer"
+                                        />
+                                        <span className="truncate font-medium">{doc.name}</span>
+                                    </label>
+                                ))}
+                                {documents.length === 0 && <span className="text-sm text-gray-600 italic px-2">No documents in workspace...</span>}
+                            </div>
                         </div>
 
                         <input
                             type="text"
-                            placeholder="Give your artifact a title..."
+                            placeholder="Give your study set a title..."
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
                             className="w-full bg-[#0B0D17] text-white placeholder-gray-600 px-4 py-3 rounded-xl border border-gray-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none mb-4 text-base font-medium"
@@ -708,12 +924,12 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
                         />
                         <button
                             type="submit"
-                            disabled={isGenerating || !prompt}
+                            disabled={isGenerating || !prompt || selectedTypes.length === 0}
                             className="w-full bg-white hover:bg-gray-200 text-gray-900 disabled:bg-gray-800 disabled:text-gray-500 font-bold py-3.5 rounded-xl transition-colors flex justify-center items-center text-base shadow-xl"
                         >
                             {isGenerating ? (
                                 <><RotateCw className="w-5 h-5 mr-2 animate-spin" /> Synthesizing Knowledge...</>
-                            ) : 'Generate Artifact'}
+                            ) : `Generate Selected Artifacts (${selectedTypes.length})`}
                         </button>
                     </form>
                 )}
@@ -736,13 +952,13 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
                             >
                                 <div className="flex items-start justify-between mb-3">
                                     <div className="flex items-center overflow-hidden">
-                                        <div className={`p-2 rounded-lg mr-3 shrink-0 ${artifact.artifact_type === 'graph' ? 'bg-purple-900/30' : artifact.artifact_type === 'flashcards' ? 'bg-indigo-900/30' : artifact.artifact_type === 'quiz' ? 'bg-green-900/30' : 'bg-blue-900/30'}`}>
+                                        <div className={`p-2 rounded-lg mr-3 shrink-0 ${artifact.artifact_type === 'graph' ? 'bg-purple-900/30' : artifact.artifact_type === 'flashcards' ? 'bg-indigo-900/30' : artifact.artifact_type === 'quiz' ? 'bg-emerald-900/30' : 'bg-blue-900/30'}`}>
                                             {artifact.artifact_type === 'graph' ? (
                                                 <Network className="w-5 h-5 text-purple-400" />
                                             ) : artifact.artifact_type === 'flashcards' ? (
                                                 <CreditCard className="w-5 h-5 text-indigo-400" />
                                             ) : artifact.artifact_type === 'quiz' ? (
-                                                <CheckSquare className="w-5 h-5 text-green-400" />
+                                                <CheckSquare className="w-5 h-5 text-emerald-400" />
                                             ) : (
                                                 <FileText className="w-5 h-5 text-blue-500" />
                                             )}

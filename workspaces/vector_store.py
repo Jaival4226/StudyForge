@@ -57,7 +57,7 @@ class VectorStoreService:
         )
 
     @classmethod
-    def query_workspace_context(cls, workspace_id, query_text, n_results=20):
+    def query_workspace_context(cls, workspace_id, query_text, n_results=35, selected_doc_ids=None):
         """
         Searches the workspace's local vector collection for the text chunks 
         most semantically relevant to a user query.
@@ -65,9 +65,19 @@ class VectorStoreService:
         collection = cls.get_or_create_collection(workspace_id)
         query_vector = embedding_model.encode(query_text).tolist()
         
+        # --- NEW: Filter by selected documents from the frontend ---
+        where_clause = None
+        if selected_doc_ids and len(selected_doc_ids) > 0:
+            doc_ids = [int(doc_id) for doc_id in selected_doc_ids]
+            if len(doc_ids) == 1:
+                where_clause = {"document_id": doc_ids[0]}
+            else:
+                where_clause = {"document_id": {"$in": doc_ids}}
+
         results = collection.query(
             query_embeddings=[query_vector],
-            n_results=n_results
+            n_results=n_results,
+            where=where_clause
         )
         
         # Flatten results into an easily consumable dictionary array
@@ -80,6 +90,7 @@ class VectorStoreService:
                     "source_type": meta["source_type"]
                 })
         return formatted_results
+
     @classmethod
     def delete_document_chunks(cls, workspace_id, document_id):
         """
