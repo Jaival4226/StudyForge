@@ -24,6 +24,7 @@ from .vector_store import VectorStoreService
 from .ai_engine import AIEngine
 from .mongo_service import ChatMemoryService
 from .mastery_service import MasteryService
+from django.http import StreamingHttpResponse
 
 def background_auto_generate(workspace_id, document_id, document_title):
     try:
@@ -103,20 +104,27 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def chat(self, request, pk=None):
-        workspace = self.get_object() 
-        user_message = request.data.get('message') or request.data.get('query') or request.data.get('prompt')
-        if not user_message:
-            return Response({"error": "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            ai_response_dict = AIEngine.chat_with_workspace(
-                workspace_id=workspace.id, 
-                user_query=user_message,
-                user_id=request.user.id
-            )
-            return Response(ai_response_dict, status=status.HTTP_200_OK)
-        except Exception as e:
-            traceback.print_exc()
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        """
+        POST /api/workspaces/<id>/chat/
+        Expects JSON payload: {"query": "What is the main topic?"}
+        """
+        user_query = request.data.get('query')
+        if not user_query:
+            return Response({"error": "Please provide a 'query' in the JSON body."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Safely extract user_id if authentication is active, fallback otherwise
+        user_id = request.user.id if request.user and request.user.is_authenticated else "anonymous"
+
+        # Wrap the AI Engine generator to stream chunks directly to the frontend
+        def stream_response():
+            try:
+                generator = AIEngine.chat_with_workspace(workspace_id=pk, user_query=user_query, user_id=user_id)
+                for chunk in generator:
+                    yield chunk
+            except Exception as e:
+                yield f"❌ Error starting stream: {str(e)}"
+
+        return StreamingHttpResponse(stream_response(), content_type='text/plain')
 
     @action(detail=True, methods=['post'])
     def generate_artifact(self, request, pk=None):

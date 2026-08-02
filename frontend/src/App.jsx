@@ -16,14 +16,10 @@ export default function App() {
   const [token, setToken] = useState(localStorage.getItem('auth_token'));
   const [refreshKey, setRefreshKey] = useState(0);
   const [rightPanelTab, setRightPanelTab] = useState('chat');
-
   const [workspaces, setWorkspaces] = useState([]);
   const [workspaceId, setWorkspaceId] = useState('');
-
-  // Added a timestamp to the state to force the PDF to jump when clicked
   const [activeMedia, setActiveMedia] = useState({ type: null, src: '', pdfFile: '', loc: null, timestamp: Date.now() });
   const [pendingSeek, setPendingSeek] = useState(null);
-  
   const [query, setQuery] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -40,9 +36,7 @@ export default function App() {
         const data = await response.json();
         if (response.ok) {
           setWorkspaces(data);
-          if (data.length > 0 && !workspaceId) {
-            setWorkspaceId(data[0].id.toString());
-          }
+          if (data.length > 0 && !workspaceId) setWorkspaceId(data[0].id.toString());
         }
       } catch (err) {
         console.error("Failed to load workspaces", err);
@@ -67,9 +61,7 @@ export default function App() {
           headers: { 'Authorization': `Token ${token}` }
         });
         const data = await response.json();
-        if (response.ok) {
-          setChatHistory(data.history);
-        }
+        if (response.ok) setChatHistory(data.history);
       } catch (err) {
         console.error("Failed to load history", err);
       }
@@ -104,7 +96,6 @@ export default function App() {
       const pageNum = cleanLoc.replace(/page/gi, '').trim() || '1';
       const pdfUrl = `http://localhost:8000/media/uploads/${source}#page=${pageNum}`;
       
-      // Forces React to refresh the iframe so the browser plugin respects the new page jump
       setActiveMedia({ 
         type: 'pdf', 
         pdfFile: source,
@@ -117,7 +108,6 @@ export default function App() {
 
   const handleGraphResourceClick = (link) => {
     if (!link) return;
-    
     if (link.startsWith('yt:') || link.startsWith('pdf:')) {
       const parts = link.split(':');
       const source = parts[1]; 
@@ -125,7 +115,6 @@ export default function App() {
       handleResourceClick(source, loc);
       return;
     }
-
     let cleanLink = link.replace(/^\[|\]$/g, ''); 
     if (cleanLink.includes('|')) {
       const [source, loc] = cleanLink.split('|');
@@ -141,9 +130,7 @@ export default function App() {
     let match;
 
     while ((match = regex.exec(text)) !== null) {
-      if (match.index > lastIndex) {
-        parts.push(text.substring(lastIndex, match.index));
-      }
+      if (match.index > lastIndex) parts.push(text.substring(lastIndex, match.index));
       const source = match[1];
       const loc = match[2];
       const isVideo = source.length === 11 && !source.includes('.');
@@ -152,7 +139,7 @@ export default function App() {
         <button
           key={match.index}
           onClick={() => handleResourceClick(source, loc)}
-          className={`inline-flex items-center px-2 py-0.5 rounded text-xs mx-1 font-mono transition-colors shadow-sm cursor-pointer text-white ${isVideo ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-600 hover:bg-red-700'}`}
+          className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs mx-1 font-mono transition-colors shadow-sm cursor-pointer text-white ${isVideo ? 'bg-blue-600 hover:bg-blue-500' : 'bg-red-600 hover:bg-red-500'}`}
         >
           {isVideo ? <Video className="w-3 h-3 mr-1" /> : <FileText className="w-3 h-3 mr-1" />}
           {loc}
@@ -160,9 +147,7 @@ export default function App() {
       );
       lastIndex = regex.lastIndex;
     }
-    if (lastIndex < text.length) {
-      parts.push(text.substring(lastIndex));
-    }
+    if (lastIndex < text.length) parts.push(text.substring(lastIndex));
 
     return parts.map((part, index) => {
       if (typeof part === 'string') {
@@ -186,28 +171,54 @@ export default function App() {
     e.preventDefault();
     if (!query.trim() || !workspaceId) return;
 
-    const userMsg = { role: 'user', text: query };
-    setChatHistory(prev => [...prev, userMsg]);
-    setLoading(true);
+    const userQuery = query;
+    
+    // Inject user message and an empty AI placeholder to stream into
+    setChatHistory(prev => [...prev, { role: 'user', text: userQuery }, { role: 'ai', text: '' }]);
     setQuery('');
+    setLoading(true);
 
     try {
       const response = await fetch(`http://localhost:8000/api/workspaces/${workspaceId}/chat/`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Token ${token}`
-        },
-        body: JSON.stringify({ query: query })
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${token}` },
+        body: JSON.stringify({ query: userQuery })
       });
-      const data = await response.json();
-      if (response.ok) {
-        setChatHistory(prev => [...prev, { role: 'ai', text: data.answer }]);
-      } else {
-        setChatHistory(prev => [...prev, { role: 'ai', text: `❌ Error: ${data.error || 'Unauthorized'}` }]);
+
+      if (!response.ok) {
+        setChatHistory(prev => {
+          const newHistory = [...prev];
+          newHistory[newHistory.length - 1].text = `❌ Error: ${response.statusText}`;
+          return newHistory;
+        });
+        setLoading(false);
+        return;
+      }
+
+      // Read streaming text response
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let aiText = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        aiText += chunk;
+        
+        setChatHistory(prev => {
+          const newHistory = [...prev];
+          newHistory[newHistory.length - 1].text = aiText;
+          return newHistory;
+        });
       }
     } catch (err) {
-      setChatHistory(prev => [...prev, { role: 'ai', text: "❌ Failed to connect to backend." }]);
+      setChatHistory(prev => {
+        const newHistory = [...prev];
+        newHistory[newHistory.length - 1].text += "\n\n❌ Failed to connect to backend.";
+        return newHistory;
+      });
     } finally {
       setLoading(false);
     }
@@ -238,16 +249,16 @@ export default function App() {
   const activeWorkspace = workspaces.find(w => w.id.toString() === workspaceId?.toString());
 
   return (
-    <div className="w-full h-screen bg-gray-900 text-gray-100 flex flex-col font-sans">
-      <header className="w-full h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-6 shadow-md shrink-0">
+    <div className="w-full h-screen bg-surface-100 text-gray-100 flex flex-col font-sans">
+      <header className="w-full h-16 bg-surface-200 border-b border-surface-400 flex items-center justify-between px-6 shadow-sm shrink-0 z-10">
         <div className="flex items-center space-x-3">
-          <div className="bg-blue-600 p-2 rounded-lg font-bold text-white tracking-wider">AC</div>
-          <h1 className="text-xl font-bold tracking-tight text-white">Academic AI Workspace <span className="text-xs text-blue-400 font-mono">v3.0</span></h1>
+          <div className="bg-blue-600 p-2 rounded-xl font-bold text-white tracking-wider shadow-sm">AC</div>
+          <h1 className="text-xl font-bold tracking-tight text-white">Academic AI Workspace</h1>
         </div>
 
         <div className="flex items-center space-x-4">
-          <div className="flex items-center space-x-3 bg-gray-900 px-3 py-1.5 rounded-md border border-gray-700">
-            <FolderSync className="w-4 h-4 text-purple-400" />
+          <div className="flex items-center space-x-3 bg-surface-300 px-3 py-1.5 rounded-xl border border-surface-400 shadow-sm">
+            <FolderSync className="w-4 h-4 text-blue-400" />
             <select
               value={workspaceId}
               onChange={(e) => setWorkspaceId(e.target.value)}
@@ -255,27 +266,23 @@ export default function App() {
             >
               {workspaces.length === 0 && <option value="">No Workspaces Available</option>}
               {workspaces.map(ws => (
-                <option key={ws.id} value={ws.id} className="bg-gray-800">
+                <option key={ws.id} value={ws.id} className="bg-surface-300">
                   {ws.title || ws.name || `Workspace ${ws.id}`}
                 </option>
               ))}
             </select>
           </div>
-          <button
-            onClick={handleLogout}
-            className="flex items-center space-x-1 text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
-            title="Log out"
-          >
+          <button onClick={handleLogout} className="flex items-center space-x-1 text-gray-400 hover:text-red-400 transition-colors cursor-pointer" title="Log out">
             <LogOut className="w-5 h-5" />
           </button>
         </div>
       </header>
 
-      <main className="flex-1 w-full flex overflow-hidden">
-        {/* LEFT COLUMN */}
-        <section className="w-1/2 h-full bg-gray-950 border-r border-gray-800 flex flex-col items-center p-6 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700">
+      <main className="flex-1 w-full flex flex-col lg:flex-row overflow-hidden">
+        <section className={`transition-all duration-300 ease-in-out bg-surface-100 border-b lg:border-b-0 lg:border-r border-surface-400 flex flex-col items-center p-6 overflow-y-auto 
+          ${activeMedia.src ? 'h-[40vh] lg:h-full lg:w-1/2' : 'h-[30vh] lg:h-full lg:w-1/3'}`}>
           
-          <div className="w-full mb-4 flex items-center space-x-2 bg-gray-900 px-4 py-2 rounded-xl border border-gray-800 shadow-sm mt-auto shrink-0">
+          <div className="w-full mb-4 flex items-center space-x-2 bg-surface-200 px-4 py-2 rounded-xl border border-surface-400 shadow-sm mt-auto shrink-0">
             <span className="text-xs text-gray-400 font-mono uppercase tracking-wider">Active Media:</span>
             <input
               type="text"
@@ -286,7 +293,7 @@ export default function App() {
             />
           </div>
 
-          <div className="w-full aspect-video bg-gray-900 rounded-xl overflow-hidden border border-gray-800 shadow-2xl flex items-center justify-center shrink-0">
+          <div className="w-full aspect-video bg-surface-200 rounded-xl overflow-hidden border border-surface-400 shadow-sm flex items-center justify-center shrink-0">
             {activeMedia.type === 'video' ? (
               <YouTube
                 key={activeMedia.src}
@@ -303,10 +310,8 @@ export default function App() {
                 title="PDF Viewer"
               />
             ) : (
-              <div className="flex flex-col items-center justify-center h-full bg-gray-900 border-2 border-dashed border-gray-700 rounded-xl text-gray-500 w-full">
-                <svg className="w-12 h-12 mb-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-                </svg>
+              <div className="flex flex-col items-center justify-center h-full bg-surface-200 border-2 border-dashed border-surface-400 rounded-xl text-gray-500 w-full">
+                <Video className="w-10 h-10 mb-3 text-gray-600" />
                 <p className="text-sm font-medium text-gray-300">Media will be shown here</p>
                 <p className="text-xs mt-1 text-gray-500">Click a smart citation to load a Video or PDF</p>
               </div>
@@ -320,7 +325,7 @@ export default function App() {
           </div>
 
           {activeWorkspace?.is_owner && (
-            <div className="w-full max-w-md border-t border-gray-800 pt-6 pb-2 shrink-0">
+            <div className="w-full max-w-md border-t border-surface-400 pt-6 pb-2 shrink-0">
               <UploadZone workspaceId={workspaceId} onUploadSuccess={() => setRefreshKey(prev => prev + 1)} />
             </div>
           )}
@@ -336,7 +341,7 @@ export default function App() {
                   </>
                 ) : (
                   <div className="bg-blue-900/30 border border-blue-700 p-4 rounded-xl flex flex-col items-center justify-center text-center space-y-2 mt-4 shadow-sm">
-                    <div className="bg-blue-600 p-2 rounded-full">
+                    <div className="bg-blue-600 p-2 rounded-xl">
                       <FolderSync className="w-5 h-5 text-white" />
                     </div>
                     <span className="text-sm text-blue-200">
@@ -349,69 +354,48 @@ export default function App() {
           </div>
         </section>
 
-        {/* RIGHT COLUMN */}
-        <section className="w-1/2 h-full flex flex-col bg-[#0B0D17]">
-          <div className="flex justify-center items-center py-2 bg-gray-900 border-b border-gray-800 shrink-0 space-x-2">
-            <button
-              onClick={() => setRightPanelTab('chat')}
-              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${rightPanelTab === 'chat' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
-            >
+        <section className={`transition-all duration-300 ease-in-out flex flex-col bg-surface-200 ${activeMedia.src ? 'h-[60vh] lg:h-full lg:w-1/2' : 'h-[70vh] lg:h-full lg:w-2/3'}`}>
+          <div className="flex justify-center items-center py-3 bg-surface-200 border-b border-surface-400 shrink-0 space-x-3">
+            <button onClick={() => setRightPanelTab('chat')} className={`px-6 py-2 rounded-xl text-sm font-bold transition-colors cursor-pointer ${rightPanelTab === 'chat' ? 'bg-blue-600 text-white shadow-sm' : 'bg-surface-300 text-gray-400 hover:text-white border border-surface-400'}`}>
               AI Chat
             </button>
-            <button
-              onClick={() => setRightPanelTab('artifacts')}
-              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${rightPanelTab === 'artifacts' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
-            >
+            <button onClick={() => setRightPanelTab('artifacts')} className={`px-6 py-2 rounded-xl text-sm font-bold transition-colors cursor-pointer ${rightPanelTab === 'artifacts' ? 'bg-blue-600 text-white shadow-sm' : 'bg-surface-300 text-gray-400 hover:text-white border border-surface-400'}`}>
               Artifacts
             </button>
-            <button
-              onClick={() => setRightPanelTab('review')}
-              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${rightPanelTab === 'review' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
-            >
+            <button onClick={() => setRightPanelTab('review')} className={`px-6 py-2 rounded-xl text-sm font-bold transition-colors cursor-pointer ${rightPanelTab === 'review' ? 'bg-blue-600 text-white shadow-sm' : 'bg-surface-300 text-gray-400 hover:text-white border border-surface-400'}`}>
               Daily Review
             </button>
           </div>
 
           <div className={`flex-1 flex flex-col h-full overflow-hidden ${rightPanelTab === 'chat' ? 'block' : 'hidden'}`}>
             <div className="flex-1 overflow-y-auto p-6 space-y-4">
-              {chatHistory.length === 0 && !loading ? (
+              {chatHistory.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 space-y-3">
-                  <MessageSquare className="w-12 h-12 text-gray-700" />
-                  <p className="text-sm">Workspace chat ready. Ask anything about your ingested knowledge base!</p>
+                  <MessageSquare className="w-12 h-12 text-gray-600" />
+                  <p className="text-sm font-medium">Workspace chat ready. Ask anything about your ingested knowledge base!</p>
                 </div>
               ) : (
                 chatHistory.map((msg, i) => (
                   <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[85%] rounded-2xl px-4 py-3 shadow-md text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-gray-800 text-gray-100 rounded-bl-none border border-gray-700'}`}>
+                    <div className={`max-w-[85%] rounded-xl px-4 py-3 shadow-sm text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-none' : 'bg-surface-300 text-gray-100 rounded-bl-none border border-surface-400'}`}>
                       {msg.role === 'user' ? msg.text : renderMessageWithSmartTimestamps(msg.text)}
                     </div>
                   </div>
                 ))
               )}
-              {loading && (
-                <div className="flex justify-start">
-                  <div className="bg-gray-800 border border-gray-700 rounded-2xl rounded-bl-none px-4 py-3 text-sm text-gray-400 animate-pulse">
-                    AI Brain is processing context from all documents...
-                  </div>
-                </div>
-              )}
             </div>
 
-            <form onSubmit={handleSendMessage} className="p-4 bg-gray-800 border-t border-gray-700 flex space-x-3 items-center shrink-0">
+            <form onSubmit={handleSendMessage} className="p-4 bg-surface-200 border-t border-surface-400 flex space-x-3 items-center shrink-0">
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Ask a question about your ingested knowledge base..."
-                disabled={!workspaceId}
-                className="flex-1 bg-gray-900 text-gray-100 placeholder-gray-500 px-4 py-3 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-500 transition-colors text-sm disabled:opacity-50"
-              />
-              <button
-                type="submit"
+                placeholder="Ask a question about your knowledge base..."
                 disabled={loading || !workspaceId}
-                className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-xl cursor-pointer disabled:opacity-50 transition-colors shadow-lg"
-              >
-                <Send className="w-4 h-4" />
+                className="flex-1 bg-surface-300 text-white placeholder-gray-500 px-4 py-3 rounded-xl border border-surface-400 focus:outline-none focus:border-blue-500 transition-colors text-sm disabled:opacity-50"
+              />
+              <button type="submit" disabled={loading || !workspaceId} className="bg-blue-600 hover:bg-blue-500 text-white p-3 rounded-xl cursor-pointer disabled:opacity-50 transition-colors shadow-sm">
+                <Send className="w-5 h-5" />
               </button>
             </form>
           </div>
@@ -423,7 +407,6 @@ export default function App() {
           <div className={`flex-1 overflow-hidden ${rightPanelTab === 'review' ? 'block' : 'hidden'}`}>
             <DailyReview workspaceId={workspaceId} isActive={rightPanelTab === 'review'} onResourceClick={handleGraphResourceClick} />
           </div>
-
         </section>
       </main>
     </div>

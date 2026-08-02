@@ -45,13 +45,13 @@ class AIEngine:
             n_results=35
         )
 
-        if not context_results:
-            return {"answer": "I don't have any documents in this workspace to answer that.", "sources": []}
-
         formatted_context = "WORKSPACE DOCUMENTS:\n\n"
-        for idx, result in enumerate(context_results):
-            smart_tag = result.get('location', 'unknown')
-            formatted_context += f"--- Chunk {idx + 1} ---\nSOURCE_TAG: [{smart_tag}]\nTEXT: {result.get('text', '')}\n\n"
+        if context_results:
+            for idx, result in enumerate(context_results):
+                smart_tag = result.get('location', 'unknown')
+                formatted_context += f"--- Chunk {idx + 1} ---\nSOURCE_TAG: [{smart_tag}]\nTEXT: {result.get('text', '')}\n\n"
+        else:
+            formatted_context = "I don't have any documents in this workspace to answer that."
 
         mongo_service = ChatMemoryService()
         raw_history = mongo_service.get_chat_history(workspace_id, user_id)[-20:]
@@ -84,11 +84,66 @@ class AIEngine:
         Current User Query: {user_query}
         """
 
-        answer_text = AIEngine._execute_with_fallback(system_prompt)
+        # Save user message immediately before streaming
         mongo_service.save_message(workspace_id, user_id, role="user", text=user_query)
-        mongo_service.save_message(workspace_id, user_id, role="ai", text=answer_text)
 
-        return {"answer": answer_text, "sources": []}
+        global current_key_index
+        attempts = 0
+        max_attempts = len(API_KEYS) * 3 
+        
+        stream_iter = None
+        first_chunk_text = ""
+
+        while attempts < max_attempts:
+            try:
+                genai.configure(api_key=API_KEYS[current_key_index])
+                model = genai.GenerativeModel('gemini-3.6-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                
+                # Start the stream and force the first chunk to catch quota/routing errors immediately
+                stream = model.generate_content(system_prompt, stream=True)
+                stream_iter = iter(stream)
+                first_chunk = next(stream_iter)
+                first_chunk_text = first_chunk.text
+                break
+            except Exception as e:
+                error_str = str(e).lower()
+                if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str or "stopiteration" in error_str:
+                    print(f"  [AI Engine] API Key {current_key_index + 1} issue starting stream. Rotating...")
+                    current_key_index = (current_key_index + 1) % len(API_KEYS)
+                    attempts += 1
+                    time.sleep(1)
+                else:
+                    error_msg = f"❌ Setup Error: {str(e)}"
+                    mongo_service.save_message(workspace_id, user_id, role="ai", text=error_msg)
+                    yield error_msg
+                    return
+
+        if attempts >= max_attempts or not stream_iter:
+            error_msg = "❌ All Gemini API keys have been exhausted or encountered routing errors."
+            mongo_service.save_message(workspace_id, user_id, role="ai", text=error_msg)
+            yield error_msg
+            return
+
+        accumulated_text = ""
+        
+        try:
+            # Yield the initial chunk we successfully pulled
+            if first_chunk_text:
+                accumulated_text += first_chunk_text
+                yield first_chunk_text
+                
+            # Stream remaining chunks
+            for chunk in stream_iter:
+                if chunk.text:
+                    accumulated_text += chunk.text
+                    yield chunk.text
+        except Exception as e:
+            error_msg = f"\n\n[Stream interrupted mid-generation: {str(e)}]"
+            accumulated_text += error_msg
+            yield error_msg
+        finally:
+            # Persist the fully accumulated text string to MongoDB
+            mongo_service.save_message(workspace_id, user_id, role="ai", text=accumulated_text)
 
     @staticmethod
     def generate_artifact(workspace_id, user_query, artifact_type='markdown', selected_doc_ids=None):
