@@ -15,6 +15,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.authtoken.models import Token
+from rest_framework.exceptions import PermissionDenied
 
 from .models import Workspace, Document, Artifact
 from .serializers import WorkspaceSerializer, DocumentSerializer, ArtifactSerializer
@@ -22,13 +23,12 @@ from .ingestion import IngestionEngine
 from .vector_store import VectorStoreService
 from .ai_engine import AIEngine
 from .mongo_service import ChatMemoryService
+from .mastery_service import MasteryService
 
-# --- NEW: Background Task to Auto-Generate All Artifacts on Upload ---
 def background_auto_generate(workspace_id, document_id, document_title):
     try:
         workspace = Workspace.objects.get(id=workspace_id)
         
-        # Define the 4 default artifacts to automatically build
         artifacts_to_create = [
             ('markdown', f"Study Guide: {document_title}", f"Create a comprehensive study guide for {document_title}."),
             ('graph', f"Concept Map: {document_title}", f"Map out the core concepts from {document_title}."),
@@ -38,14 +38,12 @@ def background_auto_generate(workspace_id, document_id, document_title):
         
         for art_type, title, prompt in artifacts_to_create:
             try:
-                # Restrict the AI context ONLY to the newly uploaded document
                 content = AIEngine.generate_artifact(
                     workspace_id=workspace_id,
                     user_query=prompt,
                     artifact_type=art_type,
                     selected_doc_ids=[str(document_id)] 
                 )
-                
                 Artifact.objects.create(
                     workspace=workspace,
                     title=title,
@@ -92,18 +90,14 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
     def add_collaborator(self, request, pk=None):
         workspace = self.get_object()
         username_to_add = request.data.get('username')
-        
         if workspace.owner != request.user:
             return Response({'error': 'Only the workspace owner can add collaborators.'}, status=status.HTTP_403_FORBIDDEN)
-            
         try:
             user_to_add = User.objects.get(username=username_to_add)
             if user_to_add == workspace.owner:
                 return Response({'error': 'You are already the owner of this workspace.'}, status=status.HTTP_400_BAD_REQUEST)
-
             workspace.collaborators.add(user_to_add)
             return Response({'message': f'Successfully added {username_to_add} to the workspace!'}, status=status.HTTP_200_OK)
-            
         except User.DoesNotExist:
             return Response({'error': 'User not found. Check the username and try again.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -111,10 +105,8 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
     def chat(self, request, pk=None):
         workspace = self.get_object() 
         user_message = request.data.get('message') or request.data.get('query') or request.data.get('prompt')
-        
         if not user_message:
             return Response({"error": "Message is required"}, status=status.HTTP_400_BAD_REQUEST)
-            
         try:
             ai_response_dict = AIEngine.chat_with_workspace(
                 workspace_id=workspace.id, 
@@ -122,7 +114,6 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
                 user_id=request.user.id
             )
             return Response(ai_response_dict, status=status.HTTP_200_OK)
-            
         except Exception as e:
             traceback.print_exc()
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -145,14 +136,12 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
                 artifact_type=artifact_type,
                 selected_doc_ids=selected_docs
             )
-            
             artifact = Artifact.objects.create(
                 workspace=workspace,
                 title=title,
                 content=generated_content,
                 artifact_type=artifact_type
             )
-            
             return Response(ArtifactSerializer(artifact).data, status=status.HTTP_201_CREATED)
         except Exception as e:
             traceback.print_exc()
@@ -168,10 +157,8 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
     def remove_collaborator(self, request, pk=None):
         workspace = self.get_object()
         username_to_remove = request.data.get('username')
-        
         if workspace.owner != request.user:
             return Response({'error': 'Only the workspace owner can remove collaborators.'}, status=status.HTTP_403_FORBIDDEN)
-            
         try:
             user_to_remove = User.objects.get(username=username_to_remove)
             workspace.collaborators.remove(user_to_remove)
@@ -209,7 +196,6 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         workspace = self.get_object()
         if workspace.owner != request.user:
             return Response({'error': 'Only the owner can delete files.'}, status=status.HTTP_403_FORBIDDEN)
-            
         doc_id = request.data.get('document_id')
         try:
             doc = Document.objects.get(id=doc_id, workspace=workspace)
@@ -219,25 +205,150 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         except Document.DoesNotExist:
             return Response({'error': 'Document not found'}, status=status.HTTP_404_NOT_FOUND)
 
+    @action(detail=True, methods=['get'])
+    def daily_review(self, request, pk=None):
+        try:
+            workspace = self.get_object()
+            tags = MasteryService.get_due_concepts(workspace.id, request.user.id, limit=10)
+            
+            review_items = []
+            for tag in tags:
+                snippets = VectorStoreService.query_workspace_context(
+                    workspace_id=workspace.id,
+                    query_text=tag,
+                    n_results=1,
+                    distance_threshold=5.0 
+                )
+                
+                snippet_text = snippets[0]['text'] if snippets else "No direct context snippet found."
+                location = snippets[0]['location'] if snippets else "Unknown Source"
+                
+                review_items.append({
+                    "tag": tag,
+                    "snippet": snippet_text,
+                    "location": location
+                })
+                
+            return Response({"review_items": review_items}, status=status.HTTP_200_OK)
+        except Exception as e:
+            traceback.print_exc()
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'])
+    def record_mastery(self, request, pk=None):
+        workspace = self.get_object()
+        tag = request.data.get('tag')
+        correct = request.data.get('correct', False)
+        if not tag:
+            return Response({"error": "Tag is required."}, status=status.HTTP_400_BAD_REQUEST)
+        MasteryService.record_result(workspace.id, request.user.id, tag, correct)
+        return Response({"status": "recorded"}, status=status.HTTP_200_OK)
+
+
+# --- UPDATED: ArtifactViewSet now forces strict privacy on progress_state ---
 class ArtifactViewSet(viewsets.ModelViewSet):
-    queryset = Artifact.objects.all().order_by('-created_at')
     serializer_class = ArtifactSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        return Artifact.objects.filter(
+            Q(workspace__owner=user) | Q(workspace__collaborators=user)
+        ).distinct().order_by('-created_at')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        data = serializer.data
+        user_id = str(request.user.id)
+        
+        # Privacy Filter: Only return the progress that belongs to the current user
+        for item in data:
+            prog = item.get('progress_state') or {}
+            if 'nodes' in prog or 'headings' in prog:
+                item['progress_state'] = {} # Wipe out legacy unsecured progress
+            else:
+                item['progress_state'] = prog.get(user_id, {})
+                
+        return Response(data)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        data = serializer.data
+        user_id = str(request.user.id)
+        
+        prog = data.get('progress_state') or {}
+        if 'nodes' in prog or 'headings' in prog:
+            data['progress_state'] = {}
+        else:
+            data['progress_state'] = prog.get(user_id, {})
+            
+        return Response(data)
+
+    def perform_create(self, serializer):
+        workspace = serializer.validated_data.get('workspace')
+        user = self.request.user
+        if workspace and workspace.owner != user and user not in workspace.collaborators.all():
+            raise PermissionDenied("You do not have permission to add artifacts to this workspace.")
+        serializer.save()
 
     @action(detail=True, methods=['patch'])
     def update_progress(self, request, pk=None):
         try:
             artifact = self.get_object()
-            progress_state = request.data.get('progress_state', {})
-            artifact.progress_state = progress_state
+            user_id = str(request.user.id)
+            new_prog = request.data.get('progress_state', {})
+            
+            if not isinstance(artifact.progress_state, dict):
+                artifact.progress_state = {}
+                
+            # Safely inject this user's progress without touching anyone else's data
+            current_state = artifact.progress_state
+            
+            if 'nodes' in current_state: del current_state['nodes']
+            if 'headings' in current_state: del current_state['headings']
+            
+            current_state[user_id] = new_prog
+            artifact.progress_state = current_state
             artifact.save()
-            return Response(ArtifactSerializer(artifact).data, status=status.HTTP_200_OK)
+            
+            return Response(new_prog, status=status.HTTP_200_OK)
         except Exception as e:
             traceback.print_exc()
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    @action(detail=True, methods=['post'])
+    def record_review(self, request, pk=None):
+        try:
+            artifact = self.get_object()
+            tag = request.data.get('tag')
+            correct = request.data.get('correct', False)
+
+            if not tag:
+                return Response({"error": "Tag is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+            MasteryService.record_result(
+                workspace_id=artifact.workspace.id,
+                user_id=request.user.id,
+                tag=tag,
+                was_correct=correct
+            )
+            return Response({"status": "recorded"}, status=status.HTTP_200_OK)
+        except Exception as e:
+            traceback.print_exc()
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 class DocumentViewSet(viewsets.ModelViewSet):
-    queryset = Document.objects.all().order_by('-created_at')
     serializer_class = DocumentSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        return Document.objects.filter(
+            Q(workspace__owner=user) | Q(workspace__collaborators=user)
+        ).distinct().order_by('-created_at')
 
     def perform_create(self, serializer):
         if 'workspace' not in serializer.validated_data:
@@ -248,6 +359,11 @@ class DocumentViewSet(viewsets.ModelViewSet):
                     serializer.validated_data['workspace'] = workspace
                 except Workspace.DoesNotExist:
                     pass
+
+        workspace = serializer.validated_data.get('workspace')
+        user = self.request.user
+        if workspace and workspace.owner != user and user not in workspace.collaborators.all():
+            raise PermissionDenied("You do not have permission to add documents to this workspace.")
 
         document = serializer.save()
         workspace_id = document.workspace.id
@@ -281,6 +397,9 @@ class FileUploadView(APIView):
 
         try:
             workspace = Workspace.objects.get(id=workspace_id)
+            if workspace.owner != request.user and request.user not in workspace.collaborators.all():
+                return Response({"error": "You do not have permission to upload to this workspace."}, status=status.HTTP_403_FORBIDDEN)
+
             chunks = []
             final_title = ""
             source_url = ""
@@ -293,28 +412,16 @@ class FileUploadView(APIView):
                 source_url = youtube_url
                 video_id_match = re.search(r'(?:v=|/v/|youtu\.be/|/embed/)([a-zA-Z0-9_-]{11})', youtube_url)
                 video_id = video_id_match.group(1) if video_id_match else youtube_url[-11:]
-                
                 final_title = f"YouTube Video: {video_id}"
                 
-                # --- NEW: Robust Fallback Title Extraction for YouTube ---
                 try:
                     oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
-                    req = urllib.request.Request(oembed_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+                    req = urllib.request.Request(oembed_url, headers={'User-Agent': 'Mozilla/5.0'})
                     with urllib.request.urlopen(req, timeout=3) as resp:
                         meta = json.loads(resp.read().decode('utf-8'))
                         final_title = meta.get('title', final_title)
                 except Exception:
-                    try:
-                        # Fallback to scraping the raw HTML if oEmbed fails
-                        html_url = f"https://www.youtube.com/watch?v={video_id}"
-                        html_req = urllib.request.Request(html_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(html_req, timeout=3) as html_resp:
-                            html = html_resp.read().decode('utf-8')
-                            title_match = re.search(r'<title>(.*?)</title>', html)
-                            if title_match:
-                                final_title = title_match.group(1).replace(' - YouTube', '').strip()
-                    except Exception:
-                        pass
+                    pass
 
                 chunks = IngestionEngine.process_youtube(youtube_url)
                 if not chunks:
@@ -337,10 +444,8 @@ class FileUploadView(APIView):
                         destination.write(chunk)
                 
                 chunks = IngestionEngine.process_pdf(filepath, final_title)
-                
                 if not chunks:
-                    if os.path.exists(filepath):
-                        os.remove(filepath) 
+                    if os.path.exists(filepath): os.remove(filepath) 
                     return Response({"error": "Failed to extract text from PDF."}, status=status.HTTP_400_BAD_REQUEST)
 
             if chunks:
@@ -350,24 +455,13 @@ class FileUploadView(APIView):
                     type='video' if upload_type == 'youtube' else 'pdf',
                     source_url=source_url
                 )
+                VectorStoreService.index_document_chunks(workspace_id, doc.id, chunks)
                 
-                VectorStoreService.index_document_chunks(
-                    workspace_id=workspace_id,
-                    document_id=doc.id,
-                    chunks=chunks
-                )
-                
-                # --- NEW: Trigger Auto-Generation Sequence in the Background ---
-                threading.Thread(
-                    target=background_auto_generate,
-                    args=(workspace.id, doc.id, final_title)
-                ).start()
-
+                threading.Thread(target=background_auto_generate, args=(workspace.id, doc.id, final_title)).start()
                 return Response({"message": f"Successfully indexed {len(chunks)} chunks! Auto-generating artifacts in background..."}, status=status.HTTP_201_CREATED)
             else:
                 return Response({"error": "Failed to extract data."}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            import traceback
             traceback.print_exc()
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

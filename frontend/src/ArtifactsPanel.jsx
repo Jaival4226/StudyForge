@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
     FileText, Plus, X, Sparkles, ChevronLeft, Network, CreditCard, 
     HelpCircle, CheckCircle2, RotateCw, AlertCircle, ArrowRight, 
-    BookOpen, Trash2, CheckSquare, Video, Square, ListChecks 
+    BookOpen, Trash2, CheckSquare, Square, Video
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -12,7 +12,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ReactFlow, Controls, Background, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-// --- UTILITY EXTRACTED OUTSIDE COMPONENT ---
 const parseJsonContent = (raw) => {
     try {
         const clean = raw.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -22,72 +21,24 @@ const parseJsonContent = (raw) => {
     }
 };
 
-const preprocessMarkdown = (text) => {
-    if (!text) return '';
-    let processed = text.replace(/\[([a-zA-Z0-9_-]{11})\|([0-9:]+)\]/g, (match, id, time) => {
-        return `[${time}](yt:${id}:${encodeURIComponent(time)})`;
-    });
-    processed = processed.replace(/\[(.*?\.pdf)\|([^\]]+)\]/g, (match, file, page) => {
-        return `[${page}](pdf:${encodeURIComponent(file)}:${encodeURIComponent(page)})`;
-    });
-    return processed;
-};
-
-// ==========================================
-// VIEW RENDERERS
-// ==========================================
-
-const MarkdownViewer = ({ artifact, onProgressUpdate, onResourceClick }) => {
-    const content = preprocessMarkdown(artifact.content);
-    const progress = artifact.progress_state || { headings: [] };
-    const completedHeadings = progress.headings || [];
-    
-    const totalHeadings = (content.match(/^## /gm) || []).length || 1;
-    const percent = Math.min(100, Math.round((completedHeadings.length / totalHeadings) * 100));
-
-    const toggleHeading = (headingId) => {
-        const newHeadings = completedHeadings.includes(headingId) 
-            ? completedHeadings.filter(id => id !== headingId)
-            : [...completedHeadings, headingId];
-        onProgressUpdate(artifact.id, { ...progress, headings: newHeadings });
-    };
+const MarkdownViewer = ({ artifact }) => {
+    const content = (artifact.content || '')
+        .replace(/\[([a-zA-Z0-9_-]{11})\|([0-9:]+)\]/g, '')
+        .replace(/\[(.*?\.pdf)\|([^\]]+)\]/g, '');
 
     return (
         <div className="flex flex-col h-full relative bg-[#0B0D17]">
-            <div className="sticky top-0 z-20 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 p-4 flex items-center justify-between shadow-lg">
+            <div className="sticky top-0 z-20 bg-gray-900/95 backdrop-blur-md border-b border-gray-800 p-4 flex items-center shadow-lg">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center">
-                    <ListChecks className="w-4 h-4 mr-2 text-blue-500" /> Guide Progress
+                    <FileText className="w-4 h-4 mr-2 text-blue-500" /> Study Guide
                 </span>
-                <div className="flex items-center flex-1 max-w-md mx-6">
-                    <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
-                        <div className="h-full bg-emerald-500 transition-all duration-500 ease-out" style={{ width: `${percent}%` }}></div>
-                    </div>
-                </div>
-                <span className="text-sm font-mono font-bold text-emerald-400">{percent}%</span>
             </div>
             
             <div className="p-10 overflow-y-auto h-full max-w-4xl mx-auto w-full">
                 <ReactMarkdown
                     components={{
                         h1: ({ node, ...props }) => <h1 className="text-3xl font-extrabold text-white mb-8 border-b border-gray-800 pb-4" {...props} />,
-                        h2: ({ node, children, ...props }) => {
-                            const headingText = children?.toString() || Math.random().toString();
-                            const isCompleted = completedHeadings.includes(headingText);
-                            return (
-                                <div className="flex items-center justify-between mt-12 mb-6 group border-b border-gray-800/50 pb-3">
-                                    <h2 className={`text-2xl font-bold transition-colors duration-300 ${isCompleted ? 'text-emerald-500/70 line-through' : 'text-blue-400'}`} {...props}>
-                                        {children}
-                                    </h2>
-                                    <button 
-                                        onClick={() => toggleHeading(headingText)}
-                                        className={`p-2 rounded-xl transition-all duration-200 ${isCompleted ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800' : 'bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:bg-gray-700'}`}
-                                        title="Mark concept as mastered"
-                                    >
-                                        {isCompleted ? <CheckSquare className="w-5 h-5" /> : <Square className="w-5 h-5" />}
-                                    </button>
-                                </div>
-                            )
-                        },
+                        h2: ({ node, ...props }) => <h2 className="text-2xl font-bold text-blue-400 mt-12 mb-6 border-b border-gray-800/50 pb-3" {...props} />,
                         h3: ({ node, ...props }) => <h3 className="text-xl font-semibold text-gray-200 mt-8 mb-4" {...props} />,
                         p: ({ node, ...props }) => <p className="mb-6 text-gray-300 leading-loose text-base" {...props} />,
                         ul: ({ node, ...props }) => <ul className="list-disc mb-6 space-y-3 text-gray-300 text-base pl-8" {...props} />,
@@ -102,40 +53,7 @@ const MarkdownViewer = ({ artifact, onProgressUpdate, onResourceClick }) => {
                                     <code className="text-gray-300 text-sm font-mono leading-relaxed" {...props} />
                                 </pre>
                             ),
-                        a: ({ node, href, children, ...props }) => {
-                            if (href?.startsWith('yt:')) {
-                                const decodedHref = decodeURIComponent(href);
-                                const parts = decodedHref.split(':');
-                                const timestamp = parts.slice(2).join(':'); 
-                                return (
-                                    <button
-                                        onClick={(e) => { e.preventDefault(); onResourceClick && onResourceClick(decodedHref); }}
-                                        className="inline-flex items-center bg-red-900/30 hover:bg-red-800/40 text-red-400 border border-red-800 px-2 py-0.5 rounded text-xs mx-1 font-mono transition-colors cursor-pointer"
-                                        title="Jump to video timestamp"
-                                    >
-                                        <Video className="w-3 h-3 mr-1" />
-                                        {timestamp}
-                                    </button>
-                                );
-                            }
-                            if (href?.startsWith('pdf:')) {
-                                const decodedHref = decodeURIComponent(href);
-                                const parts = decodedHref.split(':');
-                                const file = parts[1];
-                                const page = parts.slice(2).join(':');
-                                return (
-                                    <button
-                                        onClick={(e) => { e.preventDefault(); onResourceClick && onResourceClick(decodedHref); }}
-                                        className="inline-flex items-center bg-blue-900/30 hover:bg-blue-800/40 text-blue-400 border border-blue-800 px-2 py-0.5 rounded text-xs mx-1 font-mono transition-colors cursor-pointer"
-                                        title={`Open ${file}`}
-                                    >
-                                        <FileText className="w-3 h-3 mr-1" />
-                                        {page}
-                                    </button>
-                                );
-                            }
-                            return <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noreferrer" {...props}>{children}</a>;
-                        }
+                        a: ({ node, href, children, ...props }) => <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noreferrer" {...props}>{children}</a>
                     }}
                 >
                     {content}
@@ -226,7 +144,7 @@ const KnowledgeGraphViewer = ({ artifact, onProgressUpdate, onResourceClick }) =
                             </div>
                             <button
                                 onClick={() => setSelectedNodeData(null)}
-                                className="bg-gray-800 hover:bg-gray-700 p-2 rounded-full text-gray-400 hover:text-white transition-colors shrink-0"
+                                className="bg-gray-800 hover:bg-gray-700 p-2 rounded-full text-gray-400 hover:text-white transition-colors shrink-0 cursor-pointer"
                             >
                                 <X className="w-5 h-5" />
                             </button>
@@ -235,7 +153,7 @@ const KnowledgeGraphViewer = ({ artifact, onProgressUpdate, onResourceClick }) =
                         <div className="p-6 overflow-y-auto flex-1">
                             <button 
                                 onClick={() => toggleNodeCompletion(selectedNodeData.id)}
-                                className={`w-full mb-8 py-3 rounded-xl font-bold transition-all flex items-center justify-center ${completedNodes.includes(selectedNodeData.id) ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800' : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'}`}
+                                className={`w-full mb-8 py-3 rounded-xl font-bold transition-all flex items-center justify-center cursor-pointer ${completedNodes.includes(selectedNodeData.id) ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800' : 'bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700'}`}
                             >
                                 {completedNodes.includes(selectedNodeData.id) ? <CheckCircle2 className="w-5 h-5 mr-2" /> : <Square className="w-5 h-5 mr-2" />}
                                 {completedNodes.includes(selectedNodeData.id) ? 'Node Mastered' : 'Mark as Mastered'}
@@ -252,24 +170,28 @@ const KnowledgeGraphViewer = ({ artifact, onProgressUpdate, onResourceClick }) =
                                 <div>
                                     <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-3">Recommended Resources</h4>
                                     <div className="space-y-3">
-                                        {selectedNodeData.resources.map((res, idx) => (
-                                            <div
-                                                key={idx}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onResourceClick && onResourceClick(res.link);
-                                                }}
-                                                className="group bg-gray-950 border border-gray-800 hover:border-purple-500/50 p-4 rounded-xl transition-colors cursor-pointer flex flex-col"
-                                            >
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="font-semibold text-gray-200 text-sm group-hover:text-purple-300 transition-colors">{res.title}</span>
-                                                    <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded border flex items-center ${res.type === 'video' ? 'bg-red-900/30 text-red-400 border-red-800' : 'bg-blue-900/30 text-blue-400 border-blue-800'}`}>
-                                                        {res.type}
-                                                    </span>
+                                        {selectedNodeData.resources.map((res, idx) => {
+                                            const isPdf = res.link.toLowerCase().includes('.pdf') || res.type === 'pdf';
+                                            return (
+                                                <div
+                                                    key={idx}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onResourceClick && onResourceClick(res.link);
+                                                    }}
+                                                    className="group bg-gray-950 border border-gray-800 hover:border-purple-500/50 p-4 rounded-xl transition-colors cursor-pointer flex flex-col"
+                                                >
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <span className="font-semibold text-gray-200 text-sm group-hover:text-purple-300 transition-colors">{res.title}</span>
+                                                        <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded border flex items-center ${!isPdf ? 'bg-blue-900/30 text-blue-400 border-blue-800' : 'bg-red-900/30 text-red-400 border-red-800'}`}>
+                                                            {!isPdf ? <Video className="w-3 h-3 mr-1" /> : <FileText className="w-3 h-3 mr-1" />}
+                                                            {isPdf ? 'PDF' : 'Video'}
+                                                        </span>
+                                                    </div>
+                                                    <span className="text-xs text-gray-500 font-mono truncate">{res.link}</span>
                                                 </div>
-                                                <span className="text-xs text-gray-500 font-mono truncate">{res.link}</span>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
@@ -281,7 +203,7 @@ const KnowledgeGraphViewer = ({ artifact, onProgressUpdate, onResourceClick }) =
     );
 };
 
-const FlashcardsViewer = ({ content, onSwitchToQuiz }) => {
+const FlashcardsViewer = ({ content, onSwitchToQuiz, onReviewResult }) => {
     const cards = parseJsonContent(content);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isFlipped, setIsFlipped] = useState(false);
@@ -295,12 +217,14 @@ const FlashcardsViewer = ({ content, onSwitchToQuiz }) => {
     const isNeedsReview = reviewCards.has(currentIndex);
 
     const markKnownAndNext = () => {
+        onReviewResult(currentCard?.tag || "Concept", true);
         setKnownCards(prev => new Set(prev).add(currentIndex));
         setReviewCards(prev => { const s = new Set(prev); s.delete(currentIndex); return s; });
         nextCard();
     };
 
     const markReviewAndNext = () => {
+        onReviewResult(currentCard?.tag || "Concept", false);
         setReviewCards(prev => new Set(prev).add(currentIndex));
         setKnownCards(prev => { const s = new Set(prev); s.delete(currentIndex); return s; });
         nextCard();
@@ -397,13 +321,13 @@ const FlashcardsViewer = ({ content, onSwitchToQuiz }) => {
                                         setReviewCards(new Set());
                                         setCurrentIndex(0);
                                     }}
-                                    className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-white font-bold rounded-xl transition-colors"
+                                    className="px-6 py-3 bg-gray-800 hover:bg-gray-700 text-white font-bold rounded-xl transition-colors cursor-pointer"
                                 >
                                     Study Again
                                 </button>
                                 <button
                                     onClick={onSwitchToQuiz}
-                                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-colors flex items-center shadow-lg shadow-emerald-900/50"
+                                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-colors flex items-center shadow-lg shadow-emerald-900/50 cursor-pointer"
                                 >
                                     <CheckSquare className="w-5 h-5 mr-2" /> Take Quiz
                                 </button>
@@ -417,7 +341,7 @@ const FlashcardsViewer = ({ content, onSwitchToQuiz }) => {
                 <button
                     onClick={prevCard}
                     disabled={currentIndex === 0}
-                    className="px-6 py-3 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-white font-medium rounded-xl transition-colors"
+                    className="px-6 py-3 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-white font-medium rounded-xl transition-colors cursor-pointer"
                 >
                     Previous
                 </button>
@@ -425,20 +349,20 @@ const FlashcardsViewer = ({ content, onSwitchToQuiz }) => {
                 <div className="flex space-x-3">
                     <button
                         onClick={markReviewAndNext}
-                        className="px-6 py-3 border border-red-800/50 text-red-400 hover:bg-red-900/30 font-medium rounded-xl transition-colors"
+                        className="px-6 py-3 border border-red-800/50 text-red-400 hover:bg-red-900/30 font-medium rounded-xl transition-colors cursor-pointer"
                     >
                         Needs Review
                     </button>
                     <button
                         onClick={markKnownAndNext}
-                        className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white font-medium rounded-xl flex items-center transition-colors shadow-lg shadow-green-900/20"
+                        className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white font-medium rounded-xl flex items-center transition-colors shadow-lg shadow-green-900/20 cursor-pointer"
                     >
                         <CheckCircle2 className="w-5 h-5 mr-2" /> Got It
                     </button>
                     <button
                         onClick={nextCard}
                         disabled={currentIndex === cards.length - 1}
-                        className="px-6 py-3 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-white font-medium rounded-xl transition-colors flex items-center"
+                        className="px-6 py-3 bg-gray-800 hover:bg-gray-700 disabled:opacity-30 text-white font-medium rounded-xl transition-colors flex items-center cursor-pointer"
                     >
                         Skip <ArrowRight className="w-4 h-4 ml-2" />
                     </button>
@@ -448,7 +372,7 @@ const FlashcardsViewer = ({ content, onSwitchToQuiz }) => {
     );
 };
 
-const QuizViewer = ({ content }) => {
+const QuizViewer = ({ content, onReviewResult }) => {
     const [questions, setQuestions] = useState([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [selectedOption, setSelectedOption] = useState(null);
@@ -487,7 +411,11 @@ const QuizViewer = ({ content }) => {
 
     const handleSubmit = () => {
         setIsSubmitted(true);
-        if (checkIsCorrect(selectedOption)) {
+        const isCorrect = checkIsCorrect(selectedOption);
+        
+        onReviewResult(currentQ?.tag || "Quiz Concept", isCorrect);
+        
+        if (isCorrect) {
             setScore(s => s + 1);
         }
     };
@@ -615,23 +543,17 @@ const QuizViewer = ({ content }) => {
     );
 };
 
-// ==========================================
-// MAIN PANEL RENDER
-// ==========================================
-
-export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
+export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKey }) {
     const [artifacts, setArtifacts] = useState([]);
     const [documents, setDocuments] = useState([]); 
     const [selectedDocs, setSelectedDocs] = useState([]); 
 
-    // --- NEW: Interactive Selection State ---
     const artifactTypeConfig = [
         { id: 'markdown', label: 'Guide', icon: FileText, activeClass: 'bg-blue-900/40 text-blue-400 border-blue-800/50 shadow-md' },
         { id: 'graph', label: 'Map', icon: Network, activeClass: 'bg-purple-900/40 text-purple-400 border-purple-800/50 shadow-md' },
         { id: 'flashcards', label: 'Cards', icon: CreditCard, activeClass: 'bg-indigo-900/40 text-indigo-400 border-indigo-800/50 shadow-md' },
         { id: 'quiz', label: 'Quiz', icon: CheckSquare, activeClass: 'bg-emerald-900/40 text-emerald-400 border-emerald-800/50 shadow-md' }
     ];
-    // Start with all selected
     const [selectedTypes, setSelectedTypes] = useState(artifactTypeConfig.map(t => t.id));
 
     const [isGenerating, setIsGenerating] = useState(false);
@@ -641,9 +563,10 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
     const [viewingArtifact, setViewingArtifact] = useState(null);
 
     useEffect(() => {
+        if (!workspaceId) return;
         fetchArtifacts();
         fetchDocuments();
-    }, [workspaceId]);
+    }, [workspaceId, refreshKey]);
 
     const fetchArtifacts = async () => {
         try {
@@ -697,6 +620,22 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
         }
     };
 
+    const handleReviewResult = async (artifactId, tag, correct) => {
+        try {
+            const token = localStorage.getItem('auth_token');
+            await fetch(`http://localhost:8000/api/artifacts/${artifactId}/record_review/`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Token ${token}`
+                },
+                body: JSON.stringify({ tag, correct })
+            });
+        } catch (error) {
+            console.error("Failed to record review", error);
+        }
+    };
+
     const toggleArtifactType = (typeId) => {
         setSelectedTypes(prev => 
             prev.includes(typeId) ? prev.filter(t => t !== typeId) : [...prev, typeId]
@@ -712,7 +651,6 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
             const token = localStorage.getItem('auth_token');
             const baseTitle = title || 'Generated Study Set';
             
-            // Loop through ONLY the selected types
             const generatePromises = selectedTypes.map(type => 
                 fetch(`http://localhost:8000/api/workspaces/${workspaceId}/generate_artifact/`, {
                     method: 'POST',
@@ -737,7 +675,6 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
             setTitle('');
             
             if (newArtifacts.length > 0) {
-                // Default to opening flashcards if generated, else the first thing they made
                 const targetArtifact = newArtifacts.find(a => a.artifact_type === 'flashcards') || newArtifacts[0];
                 setViewingArtifact(targetArtifact);
             }
@@ -792,23 +729,19 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
         const isFlashcard = viewingArtifact.artifact_type === 'flashcards';
         const isQuiz = viewingArtifact.artifact_type === 'quiz';
 
-        const processedContent = viewingArtifact.artifact_type === 'markdown' 
-            ? preprocessMarkdown(viewingArtifact.content) 
-            : viewingArtifact.content;
-
         return (
             <div className="flex flex-col h-full bg-[#0B0D17] rounded-xl border border-gray-800 overflow-hidden shadow-2xl">
                 <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-900 z-10">
                     <button
                         onClick={() => setViewingArtifact(null)}
-                        className="flex items-center text-gray-400 hover:text-white transition-colors text-sm font-medium bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500"
+                        className="flex items-center text-gray-400 hover:text-white transition-colors text-sm font-medium bg-gray-800 px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-500 cursor-pointer"
                     >
                         <ChevronLeft className="w-4 h-4 mr-1" /> Back to Library
                     </button>
                     <div className="flex items-center">
                         {isGraph ? <Network className="w-5 h-5 text-purple-400 mr-3" /> :
                             isFlashcard ? <CreditCard className="w-5 h-5 text-indigo-400 mr-3" /> :
-                                isQuiz ? <CheckSquare className="w-5 h-5 text-green-400 mr-3" /> :
+                                isQuiz ? <CheckSquare className="w-5 h-5 text-emerald-400 mr-3" /> :
                                     <FileText className="w-5 h-5 text-blue-500 mr-3" />}
                         <h3 className="text-white font-bold text-lg truncate max-w-md">{viewingArtifact.title}</h3>
                     </div>
@@ -821,12 +754,16 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
                     ) : isFlashcard ? (
                         <FlashcardsViewer 
                             content={viewingArtifact.content} 
-                            onSwitchToQuiz={() => handleSwitchToQuiz(viewingArtifact.title)} 
+                            onSwitchToQuiz={() => handleSwitchToQuiz(viewingArtifact.title)}
+                            onReviewResult={(tag, correct) => handleReviewResult(viewingArtifact.id, tag, correct)}
                         />
                     ) : isQuiz ? (
-                        <QuizViewer content={viewingArtifact.content} />
+                        <QuizViewer 
+                            content={viewingArtifact.content} 
+                            onReviewResult={(tag, correct) => handleReviewResult(viewingArtifact.id, tag, correct)}
+                        />
                     ) : (
-                        <MarkdownViewer artifact={viewingArtifact} onProgressUpdate={handleProgressUpdate} onResourceClick={onResourceClick} />
+                        <MarkdownViewer artifact={viewingArtifact} />
                     )}
                 </div>
             </div>
@@ -841,7 +778,7 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
                 </h3>
                 <button
                     onClick={() => setShowForm(!showForm)}
-                    className="flex items-center text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white py-2 px-4 rounded-lg transition-all shadow-lg shadow-blue-900/20"
+                    className="flex items-center text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white py-2 px-4 rounded-lg transition-all shadow-lg shadow-blue-900/20 cursor-pointer"
                 >
                     {showForm ? <X className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
                     {showForm ? 'Cancel' : 'Generate New'}
@@ -852,14 +789,13 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
                 {showForm && (
                     <form onSubmit={handleGenerate} className="bg-gray-900 p-6 rounded-2xl border border-gray-700 mb-8 shadow-2xl animate-in fade-in slide-in-from-top-4">
 
-                        {/* --- NEW: Interactive Toggle Buttons for Artifact Selection --- */}
                         <div className="mb-4">
                             <div className="flex justify-between items-end mb-3">
                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block">Select Artifacts to Generate</label>
                                 <button 
                                     type="button" 
                                     onClick={() => setSelectedTypes(selectedTypes.length === 4 ? [] : ['markdown', 'graph', 'flashcards', 'quiz'])}
-                                    className="text-xs font-bold text-blue-500 hover:text-blue-400"
+                                    className="text-xs font-bold text-blue-500 hover:text-blue-400 cursor-pointer"
                                 >
                                     {selectedTypes.length === 4 ? 'Deselect All' : 'Select All'}
                                 </button>
@@ -873,7 +809,7 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
                                             key={type.id}
                                             type="button"
                                             onClick={() => toggleArtifactType(type.id)}
-                                            className={`flex-1 py-2.5 text-xs font-bold rounded-lg flex items-center justify-center transition-all ${
+                                            className={`flex-1 py-2.5 text-xs font-bold rounded-lg flex items-center justify-center transition-all cursor-pointer ${
                                                 isSelected 
                                                     ? type.activeClass 
                                                     : 'text-gray-500 border border-transparent hover:bg-gray-800 hover:text-gray-300'
@@ -925,7 +861,7 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
                         <button
                             type="submit"
                             disabled={isGenerating || !prompt || selectedTypes.length === 0}
-                            className="w-full bg-white hover:bg-gray-200 text-gray-900 disabled:bg-gray-800 disabled:text-gray-500 font-bold py-3.5 rounded-xl transition-colors flex justify-center items-center text-base shadow-xl"
+                            className="w-full bg-white hover:bg-gray-200 text-gray-900 disabled:bg-gray-800 disabled:text-gray-500 font-bold py-3.5 rounded-xl transition-colors flex justify-center items-center text-base shadow-xl cursor-pointer"
                         >
                             {isGenerating ? (
                                 <><RotateCw className="w-5 h-5 mr-2 animate-spin" /> Synthesizing Knowledge...</>
@@ -968,7 +904,7 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick }) {
 
                                     <button
                                         onClick={(e) => handleDeleteArtifact(e, artifact.id)}
-                                        className="text-gray-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-900/30 transition-colors shrink-0"
+                                        className="text-gray-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-900/30 transition-colors shrink-0 cursor-pointer"
                                         title="Delete Artifact"
                                     >
                                         <Trash2 className="w-4 h-4" />

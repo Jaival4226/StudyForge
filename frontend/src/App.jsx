@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import YouTube from 'react-youtube';
+import ReactMarkdown from 'react-markdown';
 import { Send, Video, MessageSquare, LogOut, FolderSync, FileText } from 'lucide-react';
 import Login from './Login';
 import UploadZone from './UploadZone';
@@ -9,6 +10,7 @@ import InviteCollaborator from './InviteCollaborator';
 import ManageCollaborators from './ManageCollaborators';
 import ManageDocuments from './ManageDocuments';
 import ArtifactsPanel from './ArtifactsPanel';
+import DailyReview from './DailyReview';
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('auth_token'));
@@ -18,7 +20,8 @@ export default function App() {
   const [workspaces, setWorkspaces] = useState([]);
   const [workspaceId, setWorkspaceId] = useState('');
 
-  const [activeMedia, setActiveMedia] = useState({ type: null, src: '', loc: null });
+  // Added a timestamp to the state to force the PDF to jump when clicked
+  const [activeMedia, setActiveMedia] = useState({ type: null, src: '', pdfFile: '', loc: null, timestamp: Date.now() });
   const [pendingSeek, setPendingSeek] = useState(null);
   
   const [query, setQuery] = useState('');
@@ -50,7 +53,7 @@ export default function App() {
 
   useEffect(() => {
     if (workspaceId) {
-      setActiveMedia({ type: null, src: '', loc: null }); 
+      setActiveMedia({ type: null, src: '', pdfFile: '', loc: null, timestamp: Date.now() }); 
       setPendingSeek(null);
     }
   }, [workspaceId]);
@@ -75,6 +78,7 @@ export default function App() {
   }, [workspaceId, token]);
 
   const timestampToSeconds = (timestamp) => {
+    if (!timestamp || !timestamp.includes(':')) return 0;
     const parts = timestamp.split(':').map(Number);
     if (parts.length === 3) return (parts[0] * 3600) + (parts[1] * 60) + parts[2];
     if (parts.length === 2) return (parts[0] * 60) + parts[1];
@@ -82,38 +86,55 @@ export default function App() {
   };
 
   const handleResourceClick = (source, loc) => {
+    if (!source) return;
     const isVideo = source.length === 11 && !source.includes('.');
     
     if (isVideo) {
       const seconds = timestampToSeconds(loc);
-      if (activeMedia.src === source && playerRef.current) {
-        // Same video, instantly seek without reloading iframe
+      if (activeMedia.type === 'video' && activeMedia.src === source && playerRef.current) {
         playerRef.current.seekTo(seconds, true);
         playerRef.current.playVideo();
+        setActiveMedia({ type: 'video', src: source, pdfFile: '', loc: seconds, timestamp: Date.now() }); 
       } else {
-        // New video, trigger full reload and queue the seek
         setPendingSeek(seconds);
-        setActiveMedia({ type: 'video', src: source, loc: seconds });
+        setActiveMedia({ type: 'video', src: source, pdfFile: '', loc: seconds, timestamp: Date.now() });
       }
-    } else if (source.toLowerCase().endsWith('.pdf')) {
-      const pageNum = loc.replace(/page/i, '').trim();
+    } else if (source.toLowerCase().includes('.pdf')) {
+      const cleanLoc = loc ? loc.toString() : '';
+      const pageNum = cleanLoc.replace(/page/gi, '').trim() || '1';
+      const pdfUrl = `http://localhost:8000/media/uploads/${source}#page=${pageNum}`;
+      
+      // Forces React to refresh the iframe so the browser plugin respects the new page jump
       setActiveMedia({ 
         type: 'pdf', 
-        src: `http://localhost:8000/media/uploads/${source}#page=${pageNum}`,
-        loc: pageNum
+        pdfFile: source,
+        src: pdfUrl,
+        loc: `Page ${pageNum}`,
+        timestamp: Date.now() 
       });
     }
   };
 
   const handleGraphResourceClick = (link) => {
     if (!link) return;
-    if (link.includes('|')) {
-      const [source, loc] = link.split('|');
+    
+    if (link.startsWith('yt:') || link.startsWith('pdf:')) {
+      const parts = link.split(':');
+      const source = parts[1]; 
+      const loc = parts.slice(2).join(':');
+      handleResourceClick(source, loc);
+      return;
+    }
+
+    let cleanLink = link.replace(/^\[|\]$/g, ''); 
+    if (cleanLink.includes('|')) {
+      const [source, loc] = cleanLink.split('|');
       handleResourceClick(source, loc);
     }
   };
 
   const renderMessageWithSmartTimestamps = (text) => {
+    if (!text) return null;
     const regex = /\[([^|\]]+)\|([^\]]+)\]/g;
     const parts = [];
     let lastIndex = 0;
@@ -142,7 +163,23 @@ export default function App() {
     if (lastIndex < text.length) {
       parts.push(text.substring(lastIndex));
     }
-    return parts;
+
+    return parts.map((part, index) => {
+      if (typeof part === 'string') {
+        const cleanText = part.replace(/\*\*/g, '');
+        return (
+          <span key={index}>
+            {cleanText.split('\n').map((line, i, arr) => (
+              <React.Fragment key={i}>
+                {line}
+                {i !== arr.length - 1 && <br />}
+              </React.Fragment>
+            ))}
+          </span>
+        );
+      }
+      return part;
+    });
   };
 
   const handleSendMessage = async (e) => {
@@ -178,12 +215,11 @@ export default function App() {
 
   const onPlayerReady = (event) => {
     playerRef.current = event.target;
-    // Execute the queued seek once the fresh iframe reports it is ready
     if (pendingSeek !== null) {
       playerRef.current.seekTo(pendingSeek, true);
       playerRef.current.playVideo();
       setPendingSeek(null);
-    } else if (activeMedia.loc !== null) {
+    } else if (activeMedia.loc !== null && typeof activeMedia.loc === 'number') {
       playerRef.current.seekTo(activeMedia.loc, true);
       playerRef.current.playVideo();
     }
@@ -194,7 +230,7 @@ export default function App() {
     setToken(null);
     setChatHistory([]);
     setWorkspaceId('');
-    setActiveMedia({ type: null, src: '', loc: null });
+    setActiveMedia({ type: null, src: '', pdfFile: '', loc: null, timestamp: Date.now() });
   };
 
   if (!token) return <Login setToken={setToken} />;
@@ -220,14 +256,14 @@ export default function App() {
               {workspaces.length === 0 && <option value="">No Workspaces Available</option>}
               {workspaces.map(ws => (
                 <option key={ws.id} value={ws.id} className="bg-gray-800">
-                  {ws.name || `Workspace ${ws.id}`}
+                  {ws.title || ws.name || `Workspace ${ws.id}`}
                 </option>
               ))}
             </select>
           </div>
           <button
             onClick={handleLogout}
-            className="flex items-center space-x-1 text-gray-400 hover:text-red-400 transition-colors"
+            className="flex items-center space-x-1 text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
             title="Log out"
           >
             <LogOut className="w-5 h-5" />
@@ -244,7 +280,7 @@ export default function App() {
             <input
               type="text"
               readOnly
-              value={activeMedia.src ? `${activeMedia.type.toUpperCase()} | ${activeMedia.src} | ${activeMedia.loc}` : ''}
+              value={activeMedia.src ? `${activeMedia.type.toUpperCase()} | ${activeMedia.pdfFile || activeMedia.src} | ${activeMedia.loc}` : ''}
               placeholder="Waiting for media selection..."
               className="flex-1 bg-transparent text-blue-400 font-mono text-sm focus:outline-none"
             />
@@ -253,7 +289,7 @@ export default function App() {
           <div className="w-full aspect-video bg-gray-900 rounded-xl overflow-hidden border border-gray-800 shadow-2xl flex items-center justify-center shrink-0">
             {activeMedia.type === 'video' ? (
               <YouTube
-                key={activeMedia.src} // Force unmount/remount on new video
+                key={activeMedia.src}
                 videoId={activeMedia.src}
                 opts={{ width: '100%', height: '100%', playerVars: { autoplay: 1 } }}
                 onReady={onPlayerReady}
@@ -261,8 +297,9 @@ export default function App() {
               />
             ) : activeMedia.type === 'pdf' ? (
               <iframe 
+                key={`${activeMedia.pdfFile}-${activeMedia.timestamp}`} 
                 src={activeMedia.src} 
-                className="w-full h-full rounded-xl bg-gray-200" 
+                className="w-full h-full rounded-xl bg-gray-200 border-0" 
                 title="PDF Viewer"
               />
             ) : (
@@ -317,15 +354,21 @@ export default function App() {
           <div className="flex justify-center items-center py-2 bg-gray-900 border-b border-gray-800 shrink-0 space-x-2">
             <button
               onClick={() => setRightPanelTab('chat')}
-              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors ${rightPanelTab === 'chat' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${rightPanelTab === 'chat' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
             >
               AI Chat
             </button>
             <button
               onClick={() => setRightPanelTab('artifacts')}
-              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors ${rightPanelTab === 'artifacts' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${rightPanelTab === 'artifacts' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
             >
               Artifacts
+            </button>
+            <button
+              onClick={() => setRightPanelTab('review')}
+              className={`px-6 py-1.5 rounded-full text-sm font-medium transition-colors cursor-pointer ${rightPanelTab === 'review' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:text-gray-200'}`}
+            >
+              Daily Review
             </button>
           </div>
 
@@ -374,7 +417,11 @@ export default function App() {
           </div>
 
           <div className={`flex-1 overflow-hidden p-4 ${rightPanelTab === 'artifacts' ? 'block' : 'hidden'}`}>
-            <ArtifactsPanel workspaceId={workspaceId} onResourceClick={handleGraphResourceClick} />
+            <ArtifactsPanel workspaceId={workspaceId} onResourceClick={handleGraphResourceClick} refreshKey={refreshKey} />
+          </div>
+
+          <div className={`flex-1 overflow-hidden ${rightPanelTab === 'review' ? 'block' : 'hidden'}`}>
+            <DailyReview workspaceId={workspaceId} isActive={rightPanelTab === 'review'} onResourceClick={handleGraphResourceClick} />
           </div>
 
         </section>

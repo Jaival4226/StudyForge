@@ -7,43 +7,35 @@ from django.conf import settings
 from .vector_store import VectorStoreService
 from .mongo_service import ChatMemoryService
 
-# Load the array of keys (fallback to single key if array isn't defined)
 API_KEYS = getattr(settings, 'GEMINI_API_KEYS', [])
 if not API_KEYS and hasattr(settings, 'GEMINI_API_KEY'):
     API_KEYS = [settings.GEMINI_API_KEY]
 
-# Global pointer to track which API key we are currently using
 current_key_index = 0
 
 class AIEngine:
     @staticmethod
     def _execute_with_fallback(system_prompt):
-        """
-        Executes the Gemini API call. If it hits a rate limit (429) or quota error,
-        it automatically rotates to the next API key and retries.
-        """
         global current_key_index
         attempts = 0
-        max_attempts = len(API_KEYS) * 2 # Allow rotating through all keys twice
+        max_attempts = len(API_KEYS) * 3 
 
         while attempts < max_attempts:
             try:
-                # Configure with the current key in the rotation
                 genai.configure(api_key=API_KEYS[current_key_index])
-                model = genai.GenerativeModel('gemini-2.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                model = genai.GenerativeModel('gemini-3.6-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
                 response = model.generate_content(system_prompt)
                 return response.text
             except Exception as e:
                 error_str = str(e).lower()
-                if "429" in error_str or "quota" in error_str or "exhausted" in error_str:
-                    print(f"  [AI Engine] API Key {current_key_index + 1} exhausted. Rotating to next key...")
+                if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str:
+                    print(f"  [AI Engine] API Key {current_key_index + 1} issue encountered. Rotating to next key...")
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
-                    time.sleep(1) # Brief pause before retry
+                    time.sleep(1)
                 else:
-                    # If it's a completely different error (like a bad prompt), raise it
                     raise e
-        raise Exception("All Gemini API keys have been exhausted or rate-limited.")
+        raise Exception("All Gemini API keys have been exhausted or encountered routing errors.")
 
     @staticmethod
     def chat_with_workspace(workspace_id, user_query, user_id):
@@ -62,7 +54,7 @@ class AIEngine:
             formatted_context += f"--- Chunk {idx + 1} ---\nSOURCE_TAG: [{smart_tag}]\nTEXT: {result.get('text', '')}\n\n"
 
         mongo_service = ChatMemoryService()
-        raw_history = mongo_service.get_chat_history(workspace_id, user_id)
+        raw_history = mongo_service.get_chat_history(workspace_id, user_id)[-20:]
         
         formatted_memory = "PREVIOUS CONVERSATION HISTORY:\n"
         for msg in raw_history:
@@ -93,7 +85,6 @@ class AIEngine:
         """
 
         answer_text = AIEngine._execute_with_fallback(system_prompt)
-
         mongo_service.save_message(workspace_id, user_id, role="user", text=user_query)
         mongo_service.save_message(workspace_id, user_id, role="ai", text=answer_text)
 
@@ -132,9 +123,9 @@ class AIEngine:
                       "details": "A deeply detailed, multi-paragraph explanation of how this works, why it matters, and practical examples.",
                       "resources": [
                         {{
-                           "title": "Related Video Explanation", 
-                           "type": "video", 
-                           "link": "[Enter exact YouTube ID|Timestamp from source tag if available, or generate a high quality external search query]"
+                           "title": "Source Reference", 
+                           "type": "pdf", 
+                           "link": "[Use the exact SOURCE_TAG provided in the context chunks, e.g. [Unit 10_Mongoose and MERN Integration.pdf|Page 15] or [videoId|00:10:38]]"
                         }}
                       ]
                   }},
@@ -147,7 +138,7 @@ class AIEngine:
               ]
             }}
 
-            Ensure positions are spread out hierarchically (e.g., y: 0, y: 150, y: 300) so nodes do not overlap in the React Flow UI.
+            Ensure positions are spread out hierarchically so nodes do not overlap. You MUST use the exact bracketed SOURCE_TAGs from the workspace chunks for the resource links so they successfully link to PDFs and videos.
             
             {formatted_context}
             Topic Request: {user_query}
@@ -180,19 +171,20 @@ class AIEngine:
                 "question": "The text of the question?",
                 "options": ["Option A", "Option B", "Option C", "Option D"],
                 "correct_answer": "Option B",
-                "explanation": "A concise explanation of why this is the correct answer."
+                "explanation": "A concise explanation of why this is the correct answer.",
+                "tag": "Subtopic Category"
               }}
             ]
             
             CRITICAL RULES:
-            1. The "correct_answer" string MUST perfectly and exactly match one of the strings inside the "options" array. Do not alter punctuation.
-            2. Do NOT mention "Chunk X", "Document Y", or use technical database references in your explanations. Write naturally as a teacher.
+            1. The "correct_answer" string MUST perfectly and exactly match one of the strings inside the "options" array.
+            2. Do NOT mention "Chunk X".
+            3. The "tag" MUST be a short, 1-3 word classification phrase.
             
             {formatted_context}
             Topic Request: {user_query}
             """
         else:
-            # --- FIXED: Strict formatting and citation rules added back to the Markdown prompt ---
             system_prompt = f"""
             You are an elite Academic Content Generator. 
             Create a highly structured, standalone markdown document based ONLY on the provided workspace context.
@@ -202,11 +194,11 @@ class AIEngine:
             1. You MUST cite your sources using the EXACT string provided in the 'SOURCE_TAG'.
             2. Format citations exactly like this: [videoId|00:12:34] or [filename.pdf|Page 1].
             3. NEVER group multiple citations together.
-            4. Do NOT make them standard markdown web links (e.g. do not write [00:12:34](https://youtube...)). Just output the raw bracketed tag exactly as provided.
+            4. Do NOT make them standard markdown web links. Just output the raw bracketed tag exactly as provided.
             
             FORMATTING RULES:
             1. Use proper markdown spacing. Leave a blank empty line before and after headings, lists, and code blocks.
-            2. Ensure inline code `ticks` have spaces around them. Do not squish words together (e.g. write `the Employee class` not `theEmployeeclass`).
+            2. Ensure inline code `ticks` have spaces around them.
 
             {formatted_context}
             User Artifact Request: {user_query}
