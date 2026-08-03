@@ -41,12 +41,22 @@ The content is organized as follows:
 
 <directory_structure>
 chroma_db/
+  14983634-4305-4d56-9e35-7a15c7286e57/
+    data_level0.bin
+    header.bin
+    length.bin
+    link_lists.bin
   1c8fa454-4812-403d-85c1-ab9bffe4c7f2/
     data_level0.bin
     header.bin
     length.bin
     link_lists.bin
   28330d98-4477-4a58-9e11-1daab45bb627/
+    data_level0.bin
+    header.bin
+    length.bin
+    link_lists.bin
+  28d2136d-50f7-41e6-8851-b1d495c0da59/
     data_level0.bin
     header.bin
     length.bin
@@ -112,6 +122,7 @@ media/
     Unit_10_Mongoose_and_MERN_Integration_hWCyx7p.pdf
     Unit_10_Mongoose_and_MERN_Integration_HyobNpy.pdf
     Unit_10_Mongoose_and_MERN_Integration_saILNuF.pdf
+    Unit_10_Mongoose_and_MERN_Integration_u5KgBzQ.pdf
     Unit_10_Mongoose_and_MERN_Integration_uDOMgHR.pdf
     Unit_10_Mongoose_and_MERN_Integration_VAD2J3X.pdf
     Unit_10_Mongoose_and_MERN_Integration_vidg9XJ.pdf
@@ -124,6 +135,7 @@ media/
     Unit_9_MongoDB_Queries_and_Operators_HbkvIQo.pdf
     Unit_9_MongoDB_Queries_and_Operators_hQYAT7U.pdf
     Unit_9_MongoDB_Queries_and_Operators_mUWTjDt.pdf
+    Unit_9_MongoDB_Queries_and_Operators_nzeElDV.pdf
     Unit_9_MongoDB_Queries_and_Operators_OGqknEY.pdf
     Unit_9_MongoDB_Queries_and_Operators_q86eZ6v.pdf
     Unit_9_MongoDB_Queries_and_Operators_s9VZlqe.pdf
@@ -1036,356 +1048,6 @@ export const LoadingState = ({ message = "Processing..." }) => (
 );
 </file>
 
-<file path="frontend/src/CortexPanel.jsx">
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Network, X, Video, FileText, Activity, CheckCircle, AlertTriangle, Filter } from 'lucide-react';
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { ReactFlow, Controls, Background, applyNodeChanges, applyEdgeChanges, MarkerType, Handle, Position } from '@xyflow/react';
-import { forceSimulation, forceManyBody, forceCenter, forceLink, forceCollide } from 'd3-force';
-import '@xyflow/react/dist/style.css';
-
-export default function CortexPanel({ workspaceId, onResourceClick }) {
-    const [nodes, setNodes] = useState([]);
-    const [edges, setEdges] = useState([]);
-    const [selectedNodeData, setSelectedNodeData] = useState(null);
-    const [cortexStats, setCortexStats] = useState({ total: 0, mastered: 0, review: 0, new: 0 });
-    
-    // NEW: Graph Switcher State
-    const [selectedDocFilter, setSelectedDocFilter] = useState('ALL');
-
-    const currentNodesRef = useRef([]);
-    const currentEdgesRef = useRef([]);
-    
-    // FIXED: Replaced aggressive localStorage with a clean session memory cache.
-    // This prevents mastery states from bleeding across different users/logouts.
-    const localMasteryOverrides = useRef({}); 
-
-    const loadCortex = async (forceUpdate = false) => {
-        try {
-            const token = localStorage.getItem('auth_token');
-            const [graphRes, pathRes] = await Promise.all([
-                fetch(`http://localhost:8000/api/workspaces/${workspaceId}/graph/`, { headers: { 'Authorization': `Token ${token}` } }),
-                fetch(`http://localhost:8000/api/workspaces/${workspaceId}/recommended_path/`, { headers: { 'Authorization': `Token ${token}` } })
-            ]);
-            
-            if (graphRes.ok && pathRes.ok) {
-                const gData = await graphRes.json();
-                const pData = await pathRes.json();
-
-                let mCount = 0, rCount = 0, nCount = 0;
-
-                const styledNodes = gData.nodes.map(n => {
-                    const isNew = (Date.now() - new Date(n.data.updated_at).getTime()) < 3600000;
-                    const isOnPath = pData.path.map(String).includes(n.id);
-                    
-                    // Use safe session memory to stop the 5-second polling from flickering colors
-                    const backendState = n.data.mastery_state;
-                    const localState = localMasteryOverrides.current[n.data.label];
-                    const finalState = localState || backendState;
-
-                    const isMastered = finalState === 'mastered';
-                    const isWeak = finalState === 'weak';
-
-                    if (isMastered) mCount++;
-                    else if (isWeak) rCount++;
-                    else if (isNew) nCount++;
-
-                    let bg = '#1f2937', border = '#4b5563'; 
-                    if (isMastered) { bg = '#064e3b'; border = '#10b981'; } 
-                    else if (isWeak) { bg = '#450a0a'; border = '#ef4444'; } 
-                    else if (isNew) { bg = '#1e3a8a'; border = '#3b82f6'; } 
-
-                    return {
-                        ...n,
-                        style: { 
-                            backgroundColor: bg, borderColor: border, borderWidth: '2px', 
-                            color: '#fff', borderRadius: '1rem', padding: '15px', 
-                            boxShadow: isOnPath ? `0 0 15px ${border}80` : '0 4px 6px -1px rgba(0, 0, 0, 0.5)',
-                            zIndex: 100 
-                        },
-                        data: { ...n.data, isNew: !isMastered && !isWeak && isNew, isMastered, isWeak, isOnPath }
-                    };
-                });
-
-                setCortexStats({ total: gData.nodes.length, mastered: mCount, review: rCount, new: nCount });
-
-                if (forceUpdate || gData.nodes.length !== currentNodesRef.current.length || gData.edges.length !== currentEdgesRef.current.length) {
-                    const styledEdges = gData.edges.map(e => {
-                        const isPrereq = e.type === 'prerequisite';
-                        return {
-                            ...e,
-                            type: 'default', 
-                            animated: false,
-                            style: { 
-                                strokeWidth: 1.5, 
-                                stroke: isPrereq ? '#6b7280' : '#4b5563', 
-                                opacity: 0.3, 
-                                strokeDasharray: isPrereq ? 'none' : '4,4' 
-                            },
-                        };
-                    });
-
-                    const d3Links = styledEdges.map(e => ({ source: e.source, target: e.target, id: e.id }));
-
-                    const simulation = forceSimulation(styledNodes)
-                        .force('charge', forceManyBody().strength(-15000)) 
-                        .force('center', forceCenter(window.innerWidth / 2, window.innerHeight / 2))
-                        .force('link', forceLink(d3Links).id(d => d.id).distance(600))
-                        .force('collide', forceCollide().radius(250).iterations(8)) 
-                        .stop();
-
-                    for (let i = 0; i < 500; i++) simulation.tick();
-
-                    const positionedNodes = styledNodes.map(n => ({
-                        ...n, position: { x: n.x || 0, y: n.y || 0 }
-                    }));
-
-                    currentNodesRef.current = positionedNodes;
-                    currentEdgesRef.current = styledEdges;
-
-                    setNodes(positionedNodes);
-                    setEdges(styledEdges);
-                } else {
-                    setNodes(prevNodes => prevNodes.map(pn => {
-                        const updatedNode = styledNodes.find(sn => sn.id === pn.id);
-                        return updatedNode ? { ...pn, style: updatedNode.style, data: updatedNode.data } : pn;
-                    }));
-                }
-            }
-        } catch (err) {
-            console.error("Graph Sync Error:", err);
-        }
-    };
-
-    useEffect(() => {
-        if (!workspaceId) return;
-        // Wipe session cache on workspace switch
-        localMasteryOverrides.current = {}; 
-        setSelectedDocFilter('ALL');
-        loadCortex(true);
-        const intervalId = setInterval(() => loadCortex(false), 5000);
-        return () => clearInterval(intervalId);
-    }, [workspaceId]);
-
-    const handleMasteryUpdate = async (tag, isCorrect) => {
-        try {
-            const token = localStorage.getItem('auth_token');
-            
-            // Save to session memory
-            localMasteryOverrides.current[tag] = isCorrect ? 'mastered' : 'weak';
-            
-            setNodes(prevNodes => {
-                let mCount = 0, rCount = 0, nCount = 0;
-                
-                const newNodes = prevNodes.map(n => {
-                    let isMastered = n.data.isMastered;
-                    let isWeak = n.data.isWeak;
-                    let isNew = n.data.isNew;
-
-                    if (selectedNodeData && n.id === selectedNodeData.id) {
-                        isMastered = isCorrect;
-                        isWeak = !isCorrect;
-                        isNew = false;
-                        
-                        const bg = isCorrect ? '#064e3b' : '#450a0a';
-                        const border = isCorrect ? '#10b981' : '#ef4444';
-                        
-                        if (isMastered) mCount++;
-                        else if (isWeak) rCount++;
-                        else if (isNew) nCount++;
-
-                        return {
-                            ...n,
-                            style: { 
-                                ...n.style, 
-                                backgroundColor: bg, 
-                                borderColor: border,
-                                boxShadow: n.data.isOnPath ? `0 0 15px ${border}80` : '0 4px 6px -1px rgba(0, 0, 0, 0.5)'
-                            },
-                            data: { ...n.data, isMastered, isWeak, isNew }
-                        };
-                    }
-
-                    if (isMastered) mCount++;
-                    else if (isWeak) rCount++;
-                    else if (isNew) nCount++;
-
-                    return n;
-                });
-                
-                setCortexStats(prev => ({ ...prev, mastered: mCount, review: rCount, new: nCount }));
-                return newNodes;
-            });
-
-            if (selectedNodeData) {
-                setSelectedNodeData(prev => ({ ...prev, isMastered: isCorrect, isWeak: !isCorrect, isNew: false }));
-            }
-
-            await fetch(`http://localhost:8000/api/workspaces/${workspaceId}/record_mastery/`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${token}` },
-                body: JSON.stringify({ tag: tag, correct: isCorrect })
-            });
-            
-        } catch (error) {
-            console.error("Failed to update mastery:", error);
-        }
-    };
-
-    const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
-    const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
-
-    const customNodeTypes = useMemo(() => ({
-        default: ({ data }) => (
-            <div className="relative">
-                <Handle type="target" position={Position.Top} className="opacity-0 border-none" />
-                <Handle type="source" position={Position.Bottom} className="opacity-0 border-none" />
-                <div className="font-bold text-sm mb-1">{data.label}</div>
-                <div className="text-xs text-gray-300 line-clamp-2">{data.summary}</div>
-            </div>
-        )
-    }), []);
-
-    // NEW: Compute available documents for the Graph Switcher
-    const uniqueDocs = useMemo(() => {
-        const docs = new Set();
-        nodes.forEach(n => {
-            if (n.data.resources) {
-                n.data.resources.forEach(r => docs.add(r.title));
-            }
-        });
-        return Array.from(docs);
-    }, [nodes]);
-
-    // NEW: Filter the active graph view based on the Switcher
-    const filteredNodes = useMemo(() => {
-        if (selectedDocFilter === 'ALL') return nodes;
-        return nodes.filter(n => n.data.resources?.some(r => r.title === selectedDocFilter));
-    }, [nodes, selectedDocFilter]);
-
-    const filteredEdges = useMemo(() => {
-        if (selectedDocFilter === 'ALL') return edges;
-        const nodeIds = new Set(filteredNodes.map(n => n.id));
-        return edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
-    }, [edges, filteredNodes]);
-
-    if (nodes.length === 0) return (
-        <div className="flex flex-col h-full items-center justify-center p-8 bg-surface-100 rounded-xl">
-            <Activity className="w-8 h-8 mb-4 text-blue-500 animate-pulse" />
-            <div className="text-gray-500 font-mono text-sm uppercase mb-2">Initializing Neural Substrate...</div>
-        </div>
-    );
-
-    return (
-        <div className="w-full h-full relative bg-surface-100 flex flex-col rounded-xl overflow-hidden shadow-sm border border-surface-400">
-            <div className="absolute top-0 w-full z-20 bg-surface-200/95 backdrop-blur-md border-b border-surface-400 p-4 shadow-md">
-                <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-gray-300 tracking-widest uppercase flex items-center">
-                        <Activity className="w-4 h-4 mr-2 text-blue-500" /> Cortex State
-                    </span>
-                    
-                    {/* NEW: The Graph Switcher UI */}
-                    <div className="flex items-center space-x-4">
-                        <div className="flex items-center bg-surface-300 rounded-md border border-surface-400 px-2 overflow-hidden">
-                            <Filter className="w-3 h-3 text-gray-400 mr-2" />
-                            <select
-                                value={selectedDocFilter}
-                                onChange={(e) => setSelectedDocFilter(e.target.value)}
-                                className="bg-transparent text-xs font-bold text-gray-300 py-1.5 focus:outline-none cursor-pointer max-w-[200px] truncate"
-                            >
-                                <option value="ALL">All Documents (Merged)</option>
-                                {uniqueDocs.map((doc, idx) => (
-                                    <option key={idx} value={doc}>{doc}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <span className="text-xs font-mono text-gray-400">
-                            {filteredNodes.length} Concepts
-                        </span>
-                    </div>
-                </div>
-                <div className="w-full h-2 bg-surface-400 rounded-full overflow-hidden flex">
-                    <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${(cortexStats.mastered / cortexStats.total) * 100}%` }} title="Mastered"></div>
-                    <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${(cortexStats.new / cortexStats.total) * 100}%` }} title="New"></div>
-                    <div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${(cortexStats.review / cortexStats.total) * 100}%` }} title="Needs Review"></div>
-                </div>
-            </div>
-
-            <div className="flex-1 mt-16 z-10">
-                <ReactFlow 
-                    nodes={filteredNodes} 
-                    edges={filteredEdges} 
-                    nodeTypes={customNodeTypes} 
-                    onNodesChange={onNodesChange} 
-                    onEdgesChange={onEdgesChange} 
-                    onNodeClick={(_, node) => setSelectedNodeData({ ...node.data, id: node.id })} 
-                    fitView 
-                    minZoom={0.05} 
-                    maxZoom={2}
-                    className="dark"
-                >
-                    <Background color="#374151" gap={20} />
-                    <Controls className="bg-surface-300 fill-white border-surface-400 rounded-xl" />
-                </ReactFlow>
-            </div>
-
-            <AnimatePresence>
-                {selectedNodeData && (
-                    <motion.div initial={{ x: '100%', opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: '100%', opacity: 0 }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="absolute top-0 right-0 w-full md:w-[450px] h-full bg-surface-200/95 backdrop-blur-xl border-l border-surface-400 shadow-2xl z-50 flex flex-col pt-16">
-                        <div className="p-6 border-b border-surface-400 flex justify-between items-start">
-                            <div>
-                                <h3 className="text-2xl font-bold text-white mb-2">{selectedNodeData.label}</h3>
-                                <p className="text-gray-400 text-sm">{selectedNodeData.summary}</p>
-                            </div>
-                            <button onClick={() => setSelectedNodeData(null)} className="bg-surface-300 hover:bg-surface-400 p-2 rounded-xl text-gray-400 hover:text-white transition-colors cursor-pointer"><X className="w-5 h-5" /></button>
-                        </div>
-                        
-                        <div className="p-4 bg-surface-300/50 border-b border-surface-400 flex space-x-3">
-                            <button onClick={() => handleMasteryUpdate(selectedNodeData.label, true)} className="flex-1 py-2 bg-green-900/30 hover:bg-green-800/50 text-green-400 border border-green-800 rounded-lg text-sm font-bold flex justify-center items-center transition-colors cursor-pointer">
-                                <CheckCircle className="w-4 h-4 mr-2" /> Mark Mastered
-                            </button>
-                            <button onClick={() => handleMasteryUpdate(selectedNodeData.label, false)} className="flex-1 py-2 bg-red-900/30 hover:bg-red-800/50 text-red-400 border border-red-800 rounded-lg text-sm font-bold flex justify-center items-center transition-colors cursor-pointer">
-                                <AlertTriangle className="w-4 h-4 mr-2" /> Needs Review
-                            </button>
-                        </div>
-
-                        <div className="p-6 overflow-y-auto flex-1 space-y-8">
-                            <div className="prose prose-invert prose-sm">
-                                <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-2">Deep Dive</h4>
-                                <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">{selectedNodeData.details}</p>
-                            </div>
-
-                            {selectedNodeData.resources && selectedNodeData.resources.length > 0 && (
-                                <div className="mt-6 border-t border-surface-400 pt-4">
-                                    <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-3">Source Media</h4>
-                                    <div className="flex flex-wrap gap-2">
-                                        {selectedNodeData.resources.map((res, idx) => (
-                                            <button
-                                                key={idx}
-                                                // FIXED: Forcefully constructs the exact bracket tag expected by the viewer
-                                                onClick={() => {
-                                                    const cleanTitle = res.title.endsWith('.pdf') ? res.title : `${res.title}.pdf`;
-                                                    const jumpTag = `[${cleanTitle}|Page 1]`;
-                                                    onResourceClick(jumpTag);
-                                                }}
-                                                className={`inline-flex items-center px-3 py-2 rounded-md text-xs font-bold transition-colors shadow-sm cursor-pointer text-white ${res.type === 'video' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-red-600 hover:bg-red-500'}`}
-                                            >
-                                                {res.type === 'video' ? <Video className="w-4 h-4 mr-2" /> : <FileText className="w-4 h-4 mr-2" />}
-                                                {res.title}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
-    );
-}
-</file>
-
 <file path="frontend/src/Login.jsx">
 import React, { useState } from 'react';
 
@@ -2084,6 +1746,346 @@ class IngestionEngine:
         except Exception as e:
             print(f"❌ PDF Extraction Error: {e}")
             return []
+</file>
+
+<file path="frontend/src/CortexPanel.jsx">
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Network, X, Video, FileText, Activity, CheckCircle, AlertTriangle, Filter } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { ReactFlow, Controls, Background, applyNodeChanges, applyEdgeChanges, MarkerType, Handle, Position } from '@xyflow/react';
+import { forceSimulation, forceManyBody, forceCenter, forceLink, forceCollide } from 'd3-force';
+import '@xyflow/react/dist/style.css';
+
+export default function CortexPanel({ workspaceId, onResourceClick }) {
+    const [nodes, setNodes] = useState([]);
+    const [edges, setEdges] = useState([]);
+    const [selectedNodeData, setSelectedNodeData] = useState(null);
+    const [cortexStats, setCortexStats] = useState({ total: 0, mastered: 0, review: 0, new: 0 });
+    
+    const [selectedDocFilter, setSelectedDocFilter] = useState('ALL');
+
+    const currentNodesRef = useRef([]);
+    const currentEdgesRef = useRef([]);
+    
+    const localMasteryOverrides = useRef({}); 
+
+    const loadCortex = async (forceUpdate = false) => {
+        try {
+            const token = localStorage.getItem('auth_token');
+            const [graphRes, pathRes] = await Promise.all([
+                fetch(`http://localhost:8000/api/workspaces/${workspaceId}/graph/`, { headers: { 'Authorization': `Token ${token}` } }),
+                fetch(`http://localhost:8000/api/workspaces/${workspaceId}/recommended_path/`, { headers: { 'Authorization': `Token ${token}` } })
+            ]);
+            
+            if (graphRes.ok && pathRes.ok) {
+                const gData = await graphRes.json();
+                const pData = await pathRes.json();
+
+                let mCount = 0, rCount = 0, nCount = 0;
+
+                const styledNodes = gData.nodes.map(n => {
+                    const isNew = (Date.now() - new Date(n.data.updated_at).getTime()) < 3600000;
+                    const isOnPath = pData.path.map(String).includes(n.id);
+                    
+                    const backendState = n.data.mastery_state;
+                    const localState = localMasteryOverrides.current[n.data.label];
+                    const finalState = localState || backendState;
+
+                    const isMastered = finalState === 'mastered';
+                    const isWeak = finalState === 'weak';
+
+                    if (isMastered) mCount++;
+                    else if (isWeak) rCount++;
+                    else if (isNew) nCount++;
+
+                    let bg = '#1f2937', border = '#4b5563'; 
+                    if (isMastered) { bg = '#064e3b'; border = '#10b981'; } 
+                    else if (isWeak) { bg = '#450a0a'; border = '#ef4444'; } 
+                    else if (isNew) { bg = '#1e3a8a'; border = '#3b82f6'; } 
+
+                    return {
+                        ...n,
+                        style: { 
+                            backgroundColor: bg, borderColor: border, borderWidth: '2px', 
+                            color: '#fff', borderRadius: '1rem', padding: '15px', 
+                            boxShadow: isOnPath ? `0 0 15px ${border}80` : '0 4px 6px -1px rgba(0, 0, 0, 0.5)',
+                            zIndex: 100 
+                        },
+                        data: { ...n.data, isNew: !isMastered && !isWeak && isNew, isMastered, isWeak, isOnPath }
+                    };
+                });
+
+                setCortexStats({ total: gData.nodes.length, mastered: mCount, review: rCount, new: nCount });
+
+                if (forceUpdate || gData.nodes.length !== currentNodesRef.current.length || gData.edges.length !== currentEdgesRef.current.length) {
+                    const styledEdges = gData.edges.map(e => {
+                        const isPrereq = e.type === 'prerequisite';
+                        return {
+                            ...e,
+                            type: 'default', 
+                            animated: false,
+                            style: { 
+                                strokeWidth: 1.5, 
+                                stroke: isPrereq ? '#6b7280' : '#4b5563', 
+                                opacity: 0.3, 
+                                strokeDasharray: isPrereq ? 'none' : '4,4' 
+                            },
+                        };
+                    });
+
+                    const d3Links = styledEdges.map(e => ({ source: e.source, target: e.target, id: e.id }));
+
+                    // FIXED: Restored reasonable physics so it stays on screen
+                    const simulation = forceSimulation(styledNodes)
+                        .force('charge', forceManyBody().strength(-2000)) 
+                        .force('center', forceCenter(window.innerWidth / 2, window.innerHeight / 2))
+                        .force('link', forceLink(d3Links).id(d => d.id).distance(250))
+                        .force('collide', forceCollide().radius(120).iterations(8)) 
+                        .stop();
+
+                    for (let i = 0; i < 500; i++) simulation.tick();
+
+                    const positionedNodes = styledNodes.map(n => ({
+                        ...n, position: { x: n.x || 0, y: n.y || 0 }
+                    }));
+
+                    currentNodesRef.current = positionedNodes;
+                    currentEdgesRef.current = styledEdges;
+
+                    setNodes(positionedNodes);
+                    setEdges(styledEdges);
+                } else {
+                    setNodes(prevNodes => prevNodes.map(pn => {
+                        const updatedNode = styledNodes.find(sn => sn.id === pn.id);
+                        return updatedNode ? { ...pn, style: updatedNode.style, data: updatedNode.data } : pn;
+                    }));
+                }
+            }
+        } catch (err) {
+            console.error("Graph Sync Error:", err);
+        }
+    };
+
+    useEffect(() => {
+        if (!workspaceId) return;
+        localMasteryOverrides.current = {}; 
+        setSelectedDocFilter('ALL');
+        loadCortex(true);
+        const intervalId = setInterval(() => loadCortex(false), 5000);
+        return () => clearInterval(intervalId);
+    }, [workspaceId]);
+
+    const handleMasteryUpdate = async (tag, isCorrect) => {
+        try {
+            const token = localStorage.getItem('auth_token');
+            
+            localMasteryOverrides.current[tag] = isCorrect ? 'mastered' : 'weak';
+            
+            setNodes(prevNodes => {
+                let mCount = 0, rCount = 0, nCount = 0;
+                
+                const newNodes = prevNodes.map(n => {
+                    let isMastered = n.data.isMastered;
+                    let isWeak = n.data.isWeak;
+                    let isNew = n.data.isNew;
+
+                    if (selectedNodeData && n.id === selectedNodeData.id) {
+                        isMastered = isCorrect;
+                        isWeak = !isCorrect;
+                        isNew = false;
+                        
+                        const bg = isCorrect ? '#064e3b' : '#450a0a';
+                        const border = isCorrect ? '#10b981' : '#ef4444';
+                        
+                        if (isMastered) mCount++;
+                        else if (isWeak) rCount++;
+                        else if (isNew) nCount++;
+
+                        return {
+                            ...n,
+                            style: { 
+                                ...n.style, 
+                                backgroundColor: bg, 
+                                borderColor: border,
+                                boxShadow: n.data.isOnPath ? `0 0 15px ${border}80` : '0 4px 6px -1px rgba(0, 0, 0, 0.5)'
+                            },
+                            data: { ...n.data, isMastered, isWeak, isNew }
+                        };
+                    }
+
+                    if (isMastered) mCount++;
+                    else if (isWeak) rCount++;
+                    else if (isNew) nCount++;
+
+                    return n;
+                });
+                
+                setCortexStats(prev => ({ ...prev, mastered: mCount, review: rCount, new: nCount }));
+                return newNodes;
+            });
+
+            if (selectedNodeData) {
+                setSelectedNodeData(prev => ({ ...prev, isMastered: isCorrect, isWeak: !isCorrect, isNew: false }));
+            }
+
+            await fetch(`http://localhost:8000/api/workspaces/${workspaceId}/record_mastery/`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${token}` },
+                body: JSON.stringify({ tag: tag, correct: isCorrect })
+            });
+            
+        } catch (error) {
+            console.error("Failed to update mastery:", error);
+        }
+    };
+
+    const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
+    const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
+
+    const customNodeTypes = useMemo(() => ({
+        default: ({ data }) => (
+            <div className="relative">
+                <Handle type="target" position={Position.Top} className="opacity-0 border-none" />
+                <Handle type="source" position={Position.Bottom} className="opacity-0 border-none" />
+                <div className="font-bold text-sm mb-1">{data.label}</div>
+                <div className="text-xs text-gray-300 line-clamp-2">{data.summary}</div>
+            </div>
+        )
+    }), []);
+
+    const uniqueDocs = useMemo(() => {
+        const docs = new Set();
+        nodes.forEach(n => {
+            if (n.data.resources) {
+                n.data.resources.forEach(r => docs.add(r.title));
+            }
+        });
+        return Array.from(docs);
+    }, [nodes]);
+
+    const filteredNodes = useMemo(() => {
+        if (selectedDocFilter === 'ALL') return nodes;
+        return nodes.filter(n => n.data.resources?.some(r => r.title === selectedDocFilter));
+    }, [nodes, selectedDocFilter]);
+
+    const filteredEdges = useMemo(() => {
+        if (selectedDocFilter === 'ALL') return edges;
+        const nodeIds = new Set(filteredNodes.map(n => n.id));
+        return edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
+    }, [edges, filteredNodes]);
+
+    if (nodes.length === 0) return (
+        <div className="flex flex-col h-full items-center justify-center p-8 bg-surface-100 rounded-xl">
+            <Activity className="w-8 h-8 mb-4 text-blue-500 animate-pulse" />
+            <div className="text-gray-500 font-mono text-sm uppercase mb-2">Initializing Neural Substrate...</div>
+        </div>
+    );
+
+    return (
+        <div className="w-full h-full relative bg-surface-100 flex flex-col rounded-xl overflow-hidden shadow-sm border border-surface-400">
+            <div className="absolute top-0 w-full z-20 bg-surface-200/95 backdrop-blur-md border-b border-surface-400 p-4 shadow-md">
+                <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-gray-300 tracking-widest uppercase flex items-center">
+                        <Activity className="w-4 h-4 mr-2 text-blue-500" /> Cortex State
+                    </span>
+                    
+                    <div className="flex items-center space-x-4">
+                        <div className="flex items-center bg-surface-300 rounded-md border border-surface-400 px-2 overflow-hidden">
+                            <Filter className="w-3 h-3 text-gray-400 mr-2" />
+                            <select
+                                value={selectedDocFilter}
+                                onChange={(e) => setSelectedDocFilter(e.target.value)}
+                                className="bg-transparent text-xs font-bold text-gray-300 py-1.5 focus:outline-none cursor-pointer max-w-[200px] truncate"
+                            >
+                                <option value="ALL">All Documents (Merged)</option>
+                                {uniqueDocs.map((doc, idx) => (
+                                    <option key={idx} value={doc}>{doc}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <span className="text-xs font-mono text-gray-400">
+                            {filteredNodes.length} Concepts
+                        </span>
+                    </div>
+                </div>
+                <div className="w-full h-2 bg-surface-400 rounded-full overflow-hidden flex">
+                    <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${(cortexStats.mastered / cortexStats.total) * 100}%` }} title="Mastered"></div>
+                    <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${(cortexStats.new / cortexStats.total) * 100}%` }} title="New"></div>
+                    <div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${(cortexStats.review / cortexStats.total) * 100}%` }} title="Needs Review"></div>
+                </div>
+            </div>
+
+            <div className="flex-1 mt-16 z-10">
+                <ReactFlow 
+                    nodes={filteredNodes} 
+                    edges={filteredEdges} 
+                    nodeTypes={customNodeTypes} 
+                    onNodesChange={onNodesChange} 
+                    onEdgesChange={onEdgesChange} 
+                    onNodeClick={(_, node) => setSelectedNodeData({ ...node.data, id: node.id })} 
+                    fitView 
+                    minZoom={0.05} 
+                    maxZoom={2}
+                    className="dark"
+                >
+                    <Background color="#374151" gap={20} />
+                    <Controls className="bg-surface-300 fill-white border-surface-400 rounded-xl" />
+                </ReactFlow>
+            </div>
+
+            <AnimatePresence>
+                {selectedNodeData && (
+                    <motion.div initial={{ x: '100%', opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: '100%', opacity: 0 }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="absolute top-0 right-0 w-full md:w-[450px] h-full bg-surface-200/95 backdrop-blur-xl border-l border-surface-400 shadow-2xl z-50 flex flex-col pt-16">
+                        <div className="p-6 border-b border-surface-400 flex justify-between items-start">
+                            <div>
+                                <h3 className="text-2xl font-bold text-white mb-2">{selectedNodeData.label}</h3>
+                                <p className="text-gray-400 text-sm">{selectedNodeData.summary}</p>
+                            </div>
+                            <button onClick={() => setSelectedNodeData(null)} className="bg-surface-300 hover:bg-surface-400 p-2 rounded-xl text-gray-400 hover:text-white transition-colors cursor-pointer"><X className="w-5 h-5" /></button>
+                        </div>
+                        
+                        <div className="p-4 bg-surface-300/50 border-b border-surface-400 flex space-x-3">
+                            <button onClick={() => handleMasteryUpdate(selectedNodeData.label, true)} className="flex-1 py-2 bg-green-900/30 hover:bg-green-800/50 text-green-400 border border-green-800 rounded-lg text-sm font-bold flex justify-center items-center transition-colors cursor-pointer">
+                                <CheckCircle className="w-4 h-4 mr-2" /> Mark Mastered
+                            </button>
+                            <button onClick={() => handleMasteryUpdate(selectedNodeData.label, false)} className="flex-1 py-2 bg-red-900/30 hover:bg-red-800/50 text-red-400 border border-red-800 rounded-lg text-sm font-bold flex justify-center items-center transition-colors cursor-pointer">
+                                <AlertTriangle className="w-4 h-4 mr-2" /> Needs Review
+                            </button>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto flex-1 space-y-8">
+                            <div className="prose prose-invert prose-sm">
+                                <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-2">Deep Dive</h4>
+                                <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">{selectedNodeData.details}</p>
+                            </div>
+
+                            {selectedNodeData.resources && selectedNodeData.resources.length > 0 && (
+                                <div className="mt-6 border-t border-surface-400 pt-4">
+                                    <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-3">Source Media</h4>
+                                    <div className="flex flex-wrap gap-2">
+                                        {selectedNodeData.resources.map((res, idx) => (
+                                            <button
+                                                key={idx}
+                                                // FIXED: Remove the manual page string append. We pass the clean original source tag!
+                                                onClick={() => {
+                                                    onResourceClick(res.source_tag);
+                                                }}
+                                                className={`inline-flex items-center px-3 py-2 rounded-md text-xs font-bold transition-colors shadow-sm cursor-pointer text-white ${res.type === 'video' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-red-600 hover:bg-red-500'}`}
+                                            >
+                                                {res.type === 'video' ? <Video className="w-4 h-4 mr-2" /> : <FileText className="w-4 h-4 mr-2" />}
+                                                {res.title}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
+}
 </file>
 
 <file path="frontend/src/DailyReview.jsx">
@@ -3175,8 +3177,6 @@ class VectorStoreService:
 </file>
 
 <file path="frontend/src/App.jsx">
-// frontend/src/App.jsx
-
 import React, { useState, useRef, useEffect } from 'react';
 import YouTube from 'react-youtube';
 import { Send, Video, MessageSquare, LogOut, FolderSync, FileText, Activity } from 'lucide-react';
@@ -3257,7 +3257,7 @@ export default function App() {
   const handleResourceClick = (source, loc) => {
     if (!source) return;
     const isVideo = source.length === 11 && !source.includes('.');
-    
+
     if (isVideo) {
       const seconds = timestampToSeconds(loc);
       if (activeMedia.type === 'video' && activeMedia.src === source && playerRef.current) {
@@ -3268,10 +3268,16 @@ export default function App() {
         setPendingSeek(seconds);
         setActiveMedia({ type: 'video', src: source, pdfFile: '', loc: seconds, timestamp: Date.now() });
       }
-    } else if (source.toLowerCase().includes('.pdf')) {
+    } else {
+      // Treats as PDF and handles missing extensions or folders
       const cleanLoc = loc ? loc.toString() : '';
       const pageNum = cleanLoc.replace(/page/gi, '').trim() || '1';
-      const pdfUrl = `http://localhost:8000/media/uploads/${source}#page=${pageNum}`;
+      
+      let pdfPath = source;
+      if (!pdfPath.includes('/')) pdfPath = `workspace_docs/${pdfPath}`;
+      if (!pdfPath.endsWith('.pdf')) pdfPath += '.pdf';
+
+      const pdfUrl = `http://localhost:8000/media/${pdfPath}#page=${pageNum}`;
       
       setActiveMedia({ 
         type: 'pdf', 
@@ -3426,8 +3432,8 @@ export default function App() {
     <div className="w-full h-screen bg-surface-100 text-gray-100 flex flex-col font-sans">
       <header className="w-full h-16 bg-surface-200 border-b border-surface-400 flex items-center justify-between px-6 shadow-sm shrink-0 z-10">
         <div className="flex items-center space-x-3">
-          <div className="bg-blue-600 p-2 rounded-xl font-bold text-white tracking-wider shadow-sm">AC</div>
-          <h1 className="text-xl font-bold tracking-tight text-white">Academic AI Workspace</h1>
+          <div className="bg-blue-600 p-2 rounded-xl font-bold text-white tracking-wider shadow-sm">SF</div>
+          <h1 className="text-xl font-bold tracking-tight text-white">Study Forge</h1>
         </div>
 
         <div className="flex items-center space-x-4">
@@ -3441,7 +3447,7 @@ export default function App() {
               {workspaces.length === 0 && <option value="">No Workspaces Available</option>}
               {workspaces.map(ws => (
                 <option key={ws.id} value={ws.id} className="bg-surface-300">
-                  {ws.title || ws.name || `Workspace ${ws.id}`}
+                  {ws.title || `Workspace ${ws.id}`} (ID: {ws.id})
                 </option>
               ))}
             </select>
@@ -3595,8 +3601,6 @@ export default function App() {
 </file>
 
 <file path="workspaces/ai_engine.py">
-# workspaces/ai_engine.py
-
 import json
 import time
 import google.generativeai as genai
@@ -3620,20 +3624,17 @@ class AIEngine:
         while attempts < max_attempts:
             try:
                 genai.configure(api_key=API_KEYS[current_key_index])
-                # EMERGENCY FIX: Using the active, stable gemini-3.5-flash model
-                model = genai.GenerativeModel('gemini-3.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                # 🚨 CRITICAL FIX: Must be exactly 'gemini-1.5-flash'
+                model = genai.GenerativeModel('gemini-1.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
                 response = model.generate_content(system_prompt)
                 
-                # SLOWED DOWN: 12-second delay to guarantee you never hit rate limits during your demo
-                time.sleep(12)
                 return response.text
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str:
-                    print(f"  ⚠️ [AI Engine] API Key {current_key_index + 1} error: {e} | Rotating...")
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
-                    time.sleep(5)
+                    time.sleep(3)
                 else:
                     raise e
         raise Exception("All Gemini API keys have been exhausted or encountered routing errors.")
@@ -3643,7 +3644,8 @@ class AIEngine:
         context_results = VectorStoreService.query_workspace_context(
             workspace_id=workspace_id, 
             query_text=user_query, 
-            n_results=35
+            n_results=15, 
+            distance_threshold=2.0 
         )
 
         formatted_context = "WORKSPACE DOCUMENTS:\n\n"
@@ -3655,7 +3657,7 @@ class AIEngine:
             formatted_context = "I don't have any documents in this workspace to answer that."
 
         mongo_service = ChatMemoryService()
-        raw_history = mongo_service.get_chat_history(workspace_id, user_id)[-20:]
+        raw_history = mongo_service.get_chat_history(workspace_id, user_id)[-10:]
         
         formatted_memory = "PREVIOUS CONVERSATION HISTORY:\n"
         for msg in raw_history:
@@ -3690,62 +3692,55 @@ class AIEngine:
         global current_key_index
         attempts = 0
         max_attempts = len(API_KEYS) * 3 
-        stream_iter = None
-        first_chunk_text = ""
 
         while attempts < max_attempts:
             try:
                 genai.configure(api_key=API_KEYS[current_key_index])
-                model = genai.GenerativeModel('gemini-3.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                # 🚨 CRITICAL FIX: Must be exactly 'gemini-1.5-flash'
+                model = genai.GenerativeModel('gemini-1.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
                 
-                stream = model.generate_content(system_prompt, stream=True)
-                stream_iter = iter(stream)
-                first_chunk = next(stream_iter)
-                first_chunk_text = first_chunk.text
-                break
+                response = model.generate_content(system_prompt, stream=True)
+                iterator = iter(response)
+                first_chunk = next(iterator)
+                
+                accumulated_text = ""
+                if first_chunk.text:
+                    accumulated_text += first_chunk.text
+                    yield first_chunk.text
+                    
+                for chunk in iterator:
+                    if chunk.text:
+                        accumulated_text += chunk.text
+                        yield chunk.text
+                        
+                mongo_service.save_message(workspace_id, user_id, role="ai", text=accumulated_text)
+                return
+
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str or "stopiteration" in error_str:
-                    print(f"  ⚠️ [AI Engine Chat] API Key {current_key_index + 1} error: {e} | Rotating...")
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
-                    time.sleep(1)
+                    time.sleep(2)
+                    continue
                 else:
-                    error_msg = f"❌ Setup Error: {str(e)}"
+                    error_msg = f"\n\n❌ Chat Error: {str(e)}"
                     mongo_service.save_message(workspace_id, user_id, role="ai", text=error_msg)
                     yield error_msg
                     return
 
-        if attempts >= max_attempts or not stream_iter:
-            error_msg = "❌ All Gemini API keys have been exhausted or encountered routing errors."
-            mongo_service.save_message(workspace_id, user_id, role="ai", text=error_msg)
-            yield error_msg
-            return
-
-        accumulated_text = ""
-        try:
-            if first_chunk_text:
-                accumulated_text += first_chunk_text
-                yield first_chunk_text
-                
-            for chunk in stream_iter:
-                if chunk.text:
-                    accumulated_text += chunk.text
-                    yield chunk.text
-        except Exception as e:
-            error_msg = f"\n\n[Stream interrupted: {str(e)}]"
-            accumulated_text += error_msg
-            yield error_msg
-        finally:
-            mongo_service.save_message(workspace_id, user_id, role="ai", text=accumulated_text)
+        error_msg = "❌ All Gemini API keys have been exhausted or rate limited."
+        mongo_service.save_message(workspace_id, user_id, role="ai", text=error_msg)
+        yield error_msg
 
     @staticmethod
     def generate_artifact(workspace_id, user_query, artifact_type='markdown', selected_doc_ids=None):
         context_results = VectorStoreService.query_workspace_context(
             workspace_id=workspace_id, 
             query_text=user_query, 
-            n_results=35,
-            selected_doc_ids=selected_doc_ids 
+            n_results=20,
+            selected_doc_ids=selected_doc_ids,
+            distance_threshold=2.0
         )
 
         formatted_context = "WORKSPACE DOCUMENTS:\n\n"
@@ -3863,6 +3858,7 @@ import json
 import traceback
 from django.http import StreamingHttpResponse
 from django.contrib.auth.models import User
+from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -3886,8 +3882,8 @@ from .mongo_service import ChatMemoryService
 # AUTHENTICATION ENDPOINTS
 # ==========================================
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
+@api_view(['POST'])               # <--- This MUST be on top
+@permission_classes([AllowAny])   # <--- This MUST be below it
 def register_user(request):
     username = request.data.get('username')
     password = request.data.get('password')
@@ -3901,6 +3897,12 @@ def register_user(request):
     user = User.objects.create_user(username=username, password=password)
     token, _ = Token.objects.get_or_create(user=user)
     
+    # Automatically create a default workspace for the brand new user!
+    Workspace.objects.create(
+        title=f"{username.capitalize()}'s Workspace", 
+        owner=user
+    )
+    
     return Response({'token': token.key}, status=status.HTTP_201_CREATED)
 
 
@@ -3909,8 +3911,16 @@ def register_user(request):
 # ==========================================
 
 class WorkspaceViewSet(viewsets.ModelViewSet):
-    queryset = Workspace.objects.all().order_by('-created_at')
     serializer_class = WorkspaceSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            # Only return workspaces this user owns OR was explicitly invited to
+            return Workspace.objects.filter(
+                Q(owner=user) | Q(collaborators=user)
+            ).distinct().order_by('-created_at')
+        return Workspace.objects.none()
 
     @action(detail=True, methods=['post'])
     def chat(self, request, pk=None):
@@ -4028,8 +4038,17 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         doc_id = request.data.get('document_id')
         try:
             doc = Document.objects.get(id=doc_id, workspace_id=pk)
+            
+            # 1. PURGE the ghost chunks from ChromaDB!
+            VectorStoreService.delete_document_chunks(pk, doc.id)
+            
+            # 2. Delete the SQL document
             doc.delete()
-            return Response({'message': 'Document deleted.'})
+            
+            # 3. Clean up the graph (delete nodes that no longer have any source material)
+            ConceptNode.objects.filter(workspace_id=pk, resources__isnull=True).delete()
+            
+            return Response({'message': 'Document fully purged.'})
         except Document.DoesNotExist:
             return Response({'error': 'Document not found.'}, status=404)
 
@@ -4040,9 +4059,24 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         
         review_items = []
         for tag in due_tags:
-            chunks = VectorStoreService.query_workspace_context(workspace_id=pk, query_text=tag, n_results=1)
-            snippet = chunks[0]['text'][:300] + "..." if chunks else "Definition context missing."
-            location = chunks[0]['location'] if chunks else "Unknown Source"
+            node = ConceptNode.objects.filter(workspace_id=pk, label__iexact=tag).first()
+            if not node:
+                node = ConceptNode.objects.filter(workspace_id=pk, canonical_tag__iexact=tag).first()
+                
+            if node:
+                snippet = node.details if node.details else node.summary
+                first_resource = node.resources.first()
+                location = first_resource.source_tag if first_resource else "Unknown Source"
+            else:
+                chunks = VectorStoreService.query_workspace_context(
+                    workspace_id=pk, 
+                    query_text=tag, 
+                    n_results=1,
+                    distance_threshold=2.0 
+                )
+                snippet = chunks[0]['text'][:300] + "..." if chunks else "Definition context missing."
+                location = chunks[0]['location'] if chunks else "Unknown Source"
+                
             review_items.append({"tag": tag, "snippet": snippet, "location": location})
             
         return Response({"review_items": review_items})
@@ -4112,7 +4146,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
         try:
             chunks = []
             if document.type == 'pdf' and document.file_upload:
-                chunks = IngestionEngine.process_pdf(document.file_upload.path)
+                # FIXED: Pass the filename here
+                chunks = IngestionEngine.process_pdf(document.file_upload.path, filename=document.file_upload.name)
             elif document.type == 'video' and document.source_url:
                 chunks = IngestionEngine.process_youtube(document.source_url)
 
@@ -4136,7 +4171,6 @@ class FileUploadView(APIView):
         if 'workspace' not in data and 'workspace_id' in data:
             data['workspace'] = data['workspace_id']
 
-        # Intercept frontend media types and map them to the serializer choices
         if data.get('type') == 'youtube':
             data['type'] = 'video'
         elif data.get('type') == 'file':
@@ -4179,7 +4213,8 @@ class FileUploadView(APIView):
             try:
                 chunks = []
                 if document.type == 'pdf' and document.file_upload:
-                    chunks = IngestionEngine.process_pdf(document.file_upload.path)
+                    # FIXED: Pass the filename here
+                    chunks = IngestionEngine.process_pdf(document.file_upload.path, filename=document.file_upload.name)
                 elif document.type == 'video' and document.source_url:
                     chunks = IngestionEngine.process_youtube(document.source_url)
 

@@ -1,11 +1,29 @@
 @import "tailwindcss";
 
 @theme {
-  /* 4-Step Surface Scale */
-  --color-surface-100: #050505;
-  --color-surface-200: #0B0D17;
-  --color-surface-300: #111827;
-  --color-surface-400: #1f2937;
+  /* 4-Step Surface Scale - Clean Light Mode */
+  --color-surface-100: #ffffff;
+  --color-surface-200: #faf5ff;
+  --color-surface-300: #f3e8ff;
+  --color-surface-400: #e9d5ff;
+
+  /* Crisp Text Colors */
+  --color-white: #2e1065;
+  --color-gray-100: #3b0764;
+  --color-gray-200: #581c87;
+  --color-gray-300: #6b21a8;
+  --color-gray-400: #7e22ce;
+  --color-gray-500: #9333ea;
+
+  /* Card and Form Backgrounds */
+  --color-gray-700: #d8b4fe;
+  --color-gray-800: #ffffff;
+  --color-gray-900: #faf5ff;
+
+  /* Vibrant Violet / Purple Buttons with High Contrast */
+  --color-blue-600: #7c3aed;
+  --color-blue-500: #6d28d9;
+  --color-blue-700: #5b21b6;
 
   /* Unified Typography */
   --font-sans: 'Inter', sans-serif;
@@ -19,3 +37,19 @@
 .perspective-1000 { perspective: 1000px; }
 .preserve-3d { transform-style: preserve-3d; }
 .backface-hidden { backface-visibility: hidden; }
+
+/* Global overrides for primary action buttons to ensure a gorgeous violet aesthetic */
+button[type="submit"], 
+button.bg-blue-600, 
+button.bg-emerald-600 {
+  background-color: #7c3aed !important;
+  color: #ffffff !important;
+  border: 1px solid #6d28d9 !important;
+}
+
+button[type="submit"]:hover, 
+button.bg-blue-600:hover, 
+button.bg-emerald-600:hover {
+  background-color: #6d28d9 !important;
+  border-color: #5b21b6 !important;
+}
