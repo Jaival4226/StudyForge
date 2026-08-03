@@ -1,6 +1,5 @@
 import json
 import uuid
-from django.db import transaction
 from django.utils import timezone
 from .models import Workspace, Document, ConceptNode, ConceptEdge, NodeResource, ConceptEvent, ConceptMastery
 from .vector_store import VectorStoreService
@@ -61,92 +60,100 @@ class GraphEngine:
         nodes_merged = 0
         edges_inferred = 0
 
-        with transaction.atomic():
-            workspace = Workspace.objects.get(id=workspace_id)
+        workspace = Workspace.objects.get(id=workspace_id)
 
-            for cand in candidates:
-                cand_text = f"{cand['name']}. {cand['summary']}"
-                embeds = embedding_fn([cand_text])
+        for cand in candidates:
+            cand_text = f"{cand['name']}. {cand['summary']}"
+            embeds = embedding_fn([cand_text])
+            
+            results = collection.query(query_embeddings=embeds, n_results=3)
+            nearest_id = None
+            distance = 1.0
+
+            if results['ids'] and results['ids'][0]:
+                nearest_id = results['ids'][0][0]
+                distance = results['distances'][0][0]
+
+            target_node = None
+            target_node_candidate = None
+            
+            # FIX: Safely check if the node exists in SQLite to prevent "DoesNotExist" crashes
+            # caused by previous database lock failures leaving phantom records in ChromaDB.
+            if nearest_id:
+                target_node_candidate = ConceptNode.objects.filter(embedding_id=nearest_id).first()
                 
-                results = collection.query(query_embeddings=embeds, n_results=3)
-                nearest_id = None
+            # If ChromaDB has an ID but SQLite doesn't, force it to be treated as a NEW concept
+            if not target_node_candidate:
                 distance = 1.0
 
-                if results['ids'] and results['ids'][0]:
-                    nearest_id = results['ids'][0][0]
-                    distance = results['distances'][0][0]
-
-                target_node = None
-
-                if distance < GraphEngine.MERGE_THRESHOLD:
-                    target_node = ConceptNode.objects.get(embedding_id=nearest_id)
-                    ConceptEvent.objects.create(node=target_node, event_type='resource_merged', description=f"Auto-merged from {document.title}", document=document)
+            if distance < GraphEngine.MERGE_THRESHOLD and target_node_candidate:
+                target_node = target_node_candidate
+                ConceptEvent.objects.create(node=target_node, event_type='resource_merged', description=f"Auto-merged from {document.title}", document=document)
+                nodes_merged += 1
+            elif distance > GraphEngine.NEW_THRESHOLD:
+                new_uuid = str(uuid.uuid4())
+                target_node = ConceptNode.objects.create(
+                    workspace_id=workspace_id, canonical_tag=cand['name'], label=cand['name'],
+                    summary=cand['summary'], details=cand['details'], embedding_id=new_uuid
+                )
+                collection.add(ids=[new_uuid], embeddings=embeds, metadatas=[{"label": cand['name']}])
+                ConceptEvent.objects.create(node=target_node, event_type='node_created', description=f"Created from {document.title}", document=document)
+                nodes_created += 1
+            else:
+                adj_prompt = f"Are these the exact same concept? Return strictly {{\"same\": true/false, \"rationale\": \"...\"}}.\n1: {target_node_candidate.label} - {target_node_candidate.summary}\n2: {cand['name']} - {cand['summary']}"
+                adj_resp = GraphEngine._parse_llm_json(AIEngine._execute_with_fallback(adj_prompt))
+                
+                if adj_resp and adj_resp.get("same"):
+                    target_node = target_node_candidate
+                    ConceptEvent.objects.create(node=target_node, event_type='resource_merged', description=f"LLM Adjudicated Merge: {adj_resp.get('rationale')}", document=document)
                     nodes_merged += 1
-                elif distance > GraphEngine.NEW_THRESHOLD:
+                else:
                     new_uuid = str(uuid.uuid4())
                     target_node = ConceptNode.objects.create(
                         workspace_id=workspace_id, canonical_tag=cand['name'], label=cand['name'],
                         summary=cand['summary'], details=cand['details'], embedding_id=new_uuid
                     )
                     collection.add(ids=[new_uuid], embeddings=embeds, metadatas=[{"label": cand['name']}])
-                    ConceptEvent.objects.create(node=target_node, event_type='node_created', description=f"Created from {document.title}", document=document)
+                    ConceptEvent.objects.create(node=target_node, event_type='node_created', description=f"LLM Adjudicated Split: {adj_resp.get('rationale') if adj_resp else 'Distinct'}", document=document)
                     nodes_created += 1
-                else:
-                    target_node_candidate = ConceptNode.objects.get(embedding_id=nearest_id)
-                    adj_prompt = f"Are these the exact same concept? Return strictly {{\"same\": true/false, \"rationale\": \"...\"}}.\n1: {target_node_candidate.label} - {target_node_candidate.summary}\n2: {cand['name']} - {cand['summary']}"
-                    adj_resp = GraphEngine._parse_llm_json(AIEngine._execute_with_fallback(adj_prompt))
-                    
-                    if adj_resp and adj_resp.get("same"):
-                        target_node = target_node_candidate
-                        ConceptEvent.objects.create(node=target_node, event_type='resource_merged', description=f"LLM Adjudicated Merge: {adj_resp.get('rationale')}", document=document)
-                        nodes_merged += 1
-                    else:
-                        new_uuid = str(uuid.uuid4())
-                        target_node = ConceptNode.objects.create(
-                            workspace_id=workspace_id, canonical_tag=cand['name'], label=cand['name'],
-                            summary=cand['summary'], details=cand['details'], embedding_id=new_uuid
-                        )
-                        collection.add(ids=[new_uuid], embeddings=embeds, metadatas=[{"label": cand['name']}])
-                        ConceptEvent.objects.create(node=target_node, event_type='node_created', description=f"LLM Adjudicated Split: {adj_resp.get('rationale') if adj_resp else 'Distinct'}", document=document)
-                        nodes_created += 1
 
-                if target_node:
-                    for tag in cand.get("source_tags", []):
-                        if not NodeResource.objects.filter(node=target_node, source_tag=tag).exists():
-                            NodeResource.objects.create(node=target_node, document=document, source_tag=tag, title=document.title, resource_type=document.type)
+            if target_node:
+                for tag in cand.get("source_tags", []):
+                    if not NodeResource.objects.filter(node=target_node, source_tag=tag).exists():
+                        NodeResource.objects.create(node=target_node, document=document, source_tag=tag, title=document.title, resource_type=document.type)
 
-                    if target_node.embedding_id == nearest_id:
-                        aug_prompt = f"Does TEXT 2 add new factual details to TEXT 1? Return {{\"adds_info\": true/false, \"new_details\": \"Only strictly new info\"}}.\nTEXT 1: {target_node.details}\nTEXT 2: {cand['details']}"
-                        aug_resp = GraphEngine._parse_llm_json(AIEngine._execute_with_fallback(aug_prompt))
-                        if aug_resp and aug_resp.get("adds_info"):
-                            target_node.details += f"\n\n{aug_resp.get('new_details')}"
-                            target_node.version += 1
-                            target_node.save()
-                            ConceptEvent.objects.create(node=target_node, event_type='detail_augmented', description="Details augmented from new source.", document=document)
+                if target_node.embedding_id == nearest_id and target_node_candidate:
+                    aug_prompt = f"Does TEXT 2 add new factual details to TEXT 1? Return {{\"adds_info\": true/false, \"new_details\": \"Only strictly new info\"}}.\nTEXT 1: {target_node.details}\nTEXT 2: {cand['details']}"
+                    aug_resp = GraphEngine._parse_llm_json(AIEngine._execute_with_fallback(aug_prompt))
+                    if aug_resp and aug_resp.get("adds_info"):
+                        target_node.details += f"\n\n{aug_resp.get('new_details')}"
+                        target_node.version += 1
+                        target_node.save()
+                        ConceptEvent.objects.create(node=target_node, event_type='detail_augmented', description="Details augmented from new source.", document=document)
 
-                    neighbors = collection.query(query_embeddings=embeds, n_results=6)
-                    if neighbors['ids'] and neighbors['ids'][0]:
-                        neighbor_ids = [nid for nid in neighbors['ids'][0] if nid != target_node.embedding_id][:5]
-                        if neighbor_ids:
-                            neighbor_nodes = list(ConceptNode.objects.filter(embedding_id__in=neighbor_ids))
-                            mapping_str = "\n".join([f"ID {n.id}: {n.label} - {n.summary}" for n in neighbor_nodes])
-                            edge_prompt = f"Given concept '{target_node.label}', which does it relate to? Return strictly JSON array: [{{'target_id': ID, 'type': 'prerequisite' | 'builds_on' | 'related_to' | 'contrasts_with'}}]\n{mapping_str}"
-                            edge_resp = GraphEngine._parse_llm_json(AIEngine._execute_with_fallback(edge_prompt)) or []
-                            
-                            for edge_data in edge_resp:
-                                try:
-                                    n_id = int(edge_data.get('target_id'))
-                                    rel_type = edge_data.get('type')
-                                    if rel_type in [c[0] for c in ConceptEdge.RELATIONSHIP_CHOICES]:
-                                        tgt = next((n for n in neighbor_nodes if n.id == n_id), None)
-                                        if tgt and not ConceptEdge.objects.filter(source_node=target_node, target_node=tgt).exists():
-                                            ConceptEdge.objects.create(workspace_id=workspace_id, source_node=target_node, target_node=tgt, relationship_type=rel_type, label=rel_type.replace('_', ' ').title(), confidence=0.85)
-                                            ConceptEvent.objects.create(node=target_node, event_type='edge_inferred', description=f"Inferred {rel_type} connection to {tgt.label}", document=document)
-                                            edges_inferred += 1
-                                except: pass
+                neighbors = collection.query(query_embeddings=embeds, n_results=6)
+                if neighbors['ids'] and neighbors['ids'][0]:
+                    neighbor_ids = [nid for nid in neighbors['ids'][0] if nid != target_node.embedding_id][:5]
+                    if neighbor_ids:
+                        neighbor_nodes = list(ConceptNode.objects.filter(embedding_id__in=neighbor_ids))
+                        mapping_str = "\n".join([f"ID {n.id}: {n.label} - {n.summary}" for n in neighbor_nodes])
+                        edge_prompt = f"Given concept '{target_node.label}', which does it relate to? Return strictly JSON array: [{{'target_id': ID, 'type': 'prerequisite' | 'builds_on' | 'related_to' | 'contrasts_with'}}]\n{mapping_str}"
+                        edge_resp = GraphEngine._parse_llm_json(AIEngine._execute_with_fallback(edge_prompt)) or []
+                        
+                        for edge_data in edge_resp:
+                            try:
+                                n_id = int(edge_data.get('target_id'))
+                                rel_type = edge_data.get('type')
+                                if rel_type in [c[0] for c in ConceptEdge.RELATIONSHIP_CHOICES]:
+                                    tgt = next((n for n in neighbor_nodes if n.id == n_id), None)
+                                    if tgt and not ConceptEdge.objects.filter(source_node=target_node, target_node=tgt).exists():
+                                        ConceptEdge.objects.create(workspace_id=workspace_id, source_node=target_node, target_node=tgt, relationship_type=rel_type, label=rel_type.replace('_', ' ').title(), confidence=0.85)
+                                        ConceptEvent.objects.create(node=target_node, event_type='edge_inferred', description=f"Inferred {rel_type} connection to {tgt.label}", document=document)
+                                        edges_inferred += 1
+                            except: pass
 
-            for node in ConceptNode.objects.filter(workspace_id=workspace_id, mastery_records__isnull=True):
-                ConceptMastery.objects.filter(workspace_id=workspace_id, tag__iexact=node.canonical_tag).update(concept_node=node)
+        for node in ConceptNode.objects.filter(workspace_id=workspace_id, mastery_records__isnull=True):
+            ConceptMastery.objects.filter(workspace_id=workspace_id, tag__iexact=node.canonical_tag).update(concept_node=node)
 
         print(f"✅ [Cortex] Final Results: {nodes_created} nodes created, {nodes_merged} merged, {edges_inferred} edges inferred.")
         

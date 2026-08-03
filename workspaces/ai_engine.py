@@ -23,16 +23,20 @@ class AIEngine:
         while attempts < max_attempts:
             try:
                 genai.configure(api_key=API_KEYS[current_key_index])
-                model = genai.GenerativeModel('gemini-3.6-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                # EMERGENCY FIX: Using the active, stable gemini-3.5-flash model
+                model = genai.GenerativeModel('gemini-3.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
                 response = model.generate_content(system_prompt)
+                
+                # SLOWED DOWN: 12-second delay to guarantee you never hit rate limits during your demo
+                time.sleep(12)
                 return response.text
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str:
-                    print(f"  [AI Engine] API Key {current_key_index + 1} issue encountered. Rotating...")
+                    print(f"  ⚠️ [AI Engine] API Key {current_key_index + 1} error: {e} | Rotating...")
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
-                    time.sleep(1)
+                    time.sleep(5)
                 else:
                     raise e
         raise Exception("All Gemini API keys have been exhausted or encountered routing errors.")
@@ -95,7 +99,7 @@ class AIEngine:
         while attempts < max_attempts:
             try:
                 genai.configure(api_key=API_KEYS[current_key_index])
-                model = genai.GenerativeModel('gemini-3.6-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                model = genai.GenerativeModel('gemini-3.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
                 
                 stream = model.generate_content(system_prompt, stream=True)
                 stream_iter = iter(stream)
@@ -105,6 +109,7 @@ class AIEngine:
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str or "stopiteration" in error_str:
+                    print(f"  ⚠️ [AI Engine Chat] API Key {current_key_index + 1} error: {e} | Rotating...")
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
                     time.sleep(1)
@@ -139,7 +144,6 @@ class AIEngine:
 
     @staticmethod
     def generate_artifact(workspace_id, user_query, artifact_type='markdown', selected_doc_ids=None):
-        # ... (Existing generation logic completely untouched) ...
         context_results = VectorStoreService.query_workspace_context(
             workspace_id=workspace_id, 
             query_text=user_query, 

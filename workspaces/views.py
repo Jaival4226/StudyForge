@@ -277,8 +277,11 @@ class FileUploadView(APIView):
         if 'workspace' not in data and 'workspace_id' in data:
             data['workspace'] = data['workspace_id']
 
+        # Intercept frontend media types and map them to the serializer choices
         if data.get('type') == 'youtube':
             data['type'] = 'video'
+        elif data.get('type') == 'file':
+            data['type'] = 'pdf'
 
         if 'youtube_url' in data:
             data['source_url'] = data['youtube_url']
