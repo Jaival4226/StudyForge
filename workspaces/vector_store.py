@@ -81,3 +81,35 @@ class VectorStoreService:
             collection.delete(where={"document_id": document_id})
         except Exception as e:
             print(f"❌ Failed to purge vectors from ChromaDB: {e}")
+    
+    @classmethod
+    def get_embedding_function(cls):
+        # 🚨 FIX: Safely return the existing embedding function or a default one
+        if hasattr(cls, 'embedding_function'):
+            return cls.embedding_function
+        elif hasattr(cls, 'embed_fn'):
+            return cls.embed_fn
+        elif hasattr(cls, '_embedding_function'):
+            return cls._embedding_function
+        else:
+            # Fallback to standard ChromaDB embedding
+            from chromadb.utils import embedding_functions
+            return embedding_functions.DefaultEmbeddingFunction()
+
+    @classmethod
+    def get_concept_collection(cls, workspace_id):
+        # Safely grab the ChromaDB client
+        if hasattr(cls, 'client'):
+            db_client = cls.client
+        elif hasattr(cls, '_client'):
+            db_client = cls._client
+        else:
+            import chromadb
+            db_client = chromadb.PersistentClient(path="./chroma_db")
+            
+        collection_name = f"workspace_{workspace_id}_concepts"
+        
+        return db_client.get_or_create_collection(
+            name=collection_name, 
+            embedding_function=cls.get_embedding_function()
+        )

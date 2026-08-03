@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// frontend/src/ArtifactsPanel.jsx
+
+import React, { useState, useEffect } from 'react';
 import { FileText, Plus, X, Sparkles, ChevronLeft, Network, CreditCard, HelpCircle, CheckCircle2, RotateCw, AlertCircle, ArrowRight, BookOpen, Trash2, CheckSquare, Square, Video } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ReactFlow, Controls, Background, applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import { EmptyState } from './components/SharedUI'; // <-- Added
+import { EmptyState } from './components/SharedUI';
 
 const parseJsonContent = (raw) => {
     try {
@@ -38,123 +38,13 @@ const MarkdownViewer = ({ artifact }) => {
                         ol: ({ node, ...props }) => <ol className="list-decimal mb-6 space-y-3 text-gray-300 text-base pl-8" {...props} />,
                         li: ({ node, ...props }) => <li className="pl-2" {...props} />,
                         strong: ({ node, ...props }) => <strong className="font-bold text-white bg-surface-400/50 px-1 rounded-md" {...props} />,
-                        code: ({ node, inline, ...props }) =>
-                            inline ? (
-                                <code className="bg-surface-300 text-blue-300 px-2 py-1 rounded-md text-sm font-mono border border-surface-400" {...props} />
-                            ) : (
-                                <pre className="bg-surface-200 border border-surface-400 rounded-xl p-6 mb-6 overflow-x-auto shadow-sm">
-                                    <code className="text-gray-300 text-sm font-mono leading-relaxed" {...props} />
-                                </pre>
-                            ),
+                        code: ({ node, inline, ...props }) => inline ? <code className="bg-surface-300 text-blue-300 px-2 py-1 rounded-md text-sm font-mono border border-surface-400" {...props} /> : <pre className="bg-surface-200 border border-surface-400 rounded-xl p-6 mb-6 overflow-x-auto shadow-sm"><code className="text-gray-300 text-sm font-mono leading-relaxed" {...props} /></pre>,
                         a: ({ node, href, children, ...props }) => <a href={href} className="text-blue-400 hover:underline" target="_blank" rel="noreferrer" {...props}>{children}</a>
                     }}
                 >
                     {content}
                 </ReactMarkdown>
             </div>
-        </div>
-    );
-};
-
-const KnowledgeGraphViewer = ({ artifact, onProgressUpdate, onResourceClick }) => {
-    const data = parseJsonContent(artifact.content);
-    const progress = artifact.progress_state || { nodes: [] };
-    const completedNodes = progress.nodes || [];
-
-    const getStyledNodes = () => {
-        return (data?.nodes || []).map(n => ({
-            ...n,
-            style: completedNodes.includes(n.id) 
-                ? { backgroundColor: '#064e3b', borderColor: '#10b981', color: '#fff', borderRadius: '1rem', padding: '15px', fontWeight: 'bold' } 
-                : { backgroundColor: '#1f2937', borderColor: '#4b5563', color: '#fff', borderRadius: '1rem', padding: '15px' }
-        }));
-    };
-
-    const [nodes, setNodes] = useState(getStyledNodes());
-    const [edges, setEdges] = useState(data?.edges || []);
-    const [selectedNodeData, setSelectedNodeData] = useState(null);
-
-    useEffect(() => {
-        setNodes(getStyledNodes());
-    }, [artifact.progress_state]);
-
-    const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
-    const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
-
-    if (!data || !data.nodes) return <div className="p-6 text-red-400">Failed to parse Graph structure.</div>;
-
-    const percent = Math.min(100, Math.round((completedNodes.length / (nodes.length || 1)) * 100));
-    const toggleNodeCompletion = (nodeId) => {
-        const newNodes = completedNodes.includes(nodeId) ? completedNodes.filter(id => id !== nodeId) : [...completedNodes, nodeId];
-        onProgressUpdate(artifact.id, { ...progress, nodes: newNodes });
-    };
-
-    return (
-        <div className="w-full h-full relative bg-surface-100 flex flex-col rounded-xl overflow-hidden">
-            <div className="absolute top-0 w-full z-10 bg-surface-200/90 backdrop-blur-md border-b border-surface-400 p-3 flex items-center justify-between shadow-sm">
-                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center">
-                    <Network className="w-4 h-4 mr-2 text-purple-400" /> Map Mastery
-                </span>
-                <div className="flex items-center flex-1 max-w-md mx-6">
-                    <div className="h-2 w-full bg-surface-400 rounded-xl overflow-hidden">
-                        <div className="h-full bg-emerald-500 transition-all duration-500 ease-out" style={{ width: `${percent}%` }}></div>
-                    </div>
-                </div>
-                <span className="text-sm font-mono font-bold text-emerald-400">{percent}%</span>
-            </div>
-
-            <div className="flex-1 mt-12">
-                <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onNodeClick={(_, node) => setSelectedNodeData({ ...node.data, id: node.id })} fitView className="dark">
-                    <Background color="#374151" gap={16} />
-                    <Controls className="bg-surface-300 fill-white border-surface-400 rounded-xl" />
-                </ReactFlow>
-            </div>
-
-            <AnimatePresence>
-                {selectedNodeData && (
-                    <motion.div initial={{ x: '100%', opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: '100%', opacity: 0 }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="absolute top-0 right-0 w-full md:w-[450px] h-full bg-surface-200/95 backdrop-blur-xl border-l border-surface-400 shadow-2xl z-50 flex flex-col pt-12">
-                        <div className="p-6 border-b border-surface-400 flex justify-between items-start">
-                            <div>
-                                <h3 className="text-2xl font-bold text-white mb-1">{selectedNodeData.label}</h3>
-                                <p className="text-purple-400 text-sm font-medium">{selectedNodeData.summary}</p>
-                            </div>
-                            <button onClick={() => setSelectedNodeData(null)} className="bg-surface-300 hover:bg-surface-400 p-2 rounded-xl text-gray-400 hover:text-white transition-colors shrink-0 cursor-pointer"><X className="w-5 h-5" /></button>
-                        </div>
-                        <div className="p-6 overflow-y-auto flex-1">
-                            <button onClick={() => toggleNodeCompletion(selectedNodeData.id)} className={`w-full mb-8 py-3 rounded-xl font-bold transition-all flex items-center justify-center cursor-pointer ${completedNodes.includes(selectedNodeData.id) ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800' : 'bg-surface-300 text-gray-300 border border-surface-400 hover:bg-surface-400'}`}>
-                                {completedNodes.includes(selectedNodeData.id) ? <CheckCircle2 className="w-5 h-5 mr-2" /> : <Square className="w-5 h-5 mr-2" />}
-                                {completedNodes.includes(selectedNodeData.id) ? 'Node Mastered' : 'Mark as Mastered'}
-                            </button>
-                            <div className="prose prose-invert prose-sm">
-                                <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-3">Deep Dive</h4>
-                                <p className="text-gray-300 leading-relaxed text-sm mb-8 whitespace-pre-wrap">{selectedNodeData.details}</p>
-                            </div>
-                            {selectedNodeData.resources && selectedNodeData.resources.length > 0 && (
-                                <div>
-                                    <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-3">Recommended Resources</h4>
-                                    <div className="space-y-3">
-                                        {selectedNodeData.resources.map((res, idx) => {
-                                            const isPdf = res.link.toLowerCase().includes('.pdf') || res.type === 'pdf';
-                                            return (
-                                                <div key={idx} onClick={(e) => { e.stopPropagation(); onResourceClick && onResourceClick(res.link); }} className="group bg-surface-300 border border-surface-400 hover:border-purple-500/50 p-4 rounded-xl transition-colors cursor-pointer flex flex-col">
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <span className="font-semibold text-gray-200 text-sm group-hover:text-purple-300 transition-colors">{res.title}</span>
-                                                        <span className={`text-[10px] uppercase font-bold px-2 py-1 rounded-md border flex items-center ${!isPdf ? 'bg-blue-900/30 text-blue-400 border-blue-800' : 'bg-red-900/30 text-red-400 border-red-800'}`}>
-                                                            {!isPdf ? <Video className="w-3 h-3 mr-1" /> : <FileText className="w-3 h-3 mr-1" />}
-                                                            {isPdf ? 'PDF' : 'Video'}
-                                                        </span>
-                                                    </div>
-                                                    <span className="text-xs text-gray-500 font-mono truncate">{res.link}</span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
         </div>
     );
 };
@@ -170,29 +60,10 @@ const FlashcardsViewer = ({ content, onSwitchToQuiz, onReviewResult }) => {
     const currentCard = cards[currentIndex];
     const isNeedsReview = reviewCards.has(currentIndex);
 
-    const markKnownAndNext = () => {
-        onReviewResult(currentCard?.tag || "Concept", true);
-        setKnownCards(prev => new Set(prev).add(currentIndex));
-        setReviewCards(prev => { const s = new Set(prev); s.delete(currentIndex); return s; });
-        nextCard();
-    };
-
-    const markReviewAndNext = () => {
-        onReviewResult(currentCard?.tag || "Concept", false);
-        setReviewCards(prev => new Set(prev).add(currentIndex));
-        setKnownCards(prev => { const s = new Set(prev); s.delete(currentIndex); return s; });
-        nextCard();
-    };
-
-    const nextCard = () => {
-        setIsFlipped(false);
-        setTimeout(() => { if (currentIndex < cards.length - 1) setCurrentIndex(prev => prev + 1); }, 150);
-    };
-
-    const prevCard = () => {
-        setIsFlipped(false);
-        setTimeout(() => { if (currentIndex > 0) setCurrentIndex(prev => prev - 1); }, 150);
-    };
+    const markKnownAndNext = () => { onReviewResult(currentCard?.tag || "Concept", true); setKnownCards(prev => new Set(prev).add(currentIndex)); setReviewCards(prev => { const s = new Set(prev); s.delete(currentIndex); return s; }); nextCard(); };
+    const markReviewAndNext = () => { onReviewResult(currentCard?.tag || "Concept", false); setReviewCards(prev => new Set(prev).add(currentIndex)); setKnownCards(prev => { const s = new Set(prev); s.delete(currentIndex); return s; }); nextCard(); };
+    const nextCard = () => { setIsFlipped(false); setTimeout(() => { if (currentIndex < cards.length - 1) setCurrentIndex(prev => prev + 1); }, 150); };
+    const prevCard = () => { setIsFlipped(false); setTimeout(() => { if (currentIndex > 0) setCurrentIndex(prev => prev - 1); }, 150); };
 
     const totalAttempted = knownCards.size + reviewCards.size;
     const progressPercentage = (totalAttempted / cards.length) * 100;
@@ -203,10 +74,7 @@ const FlashcardsViewer = ({ content, onSwitchToQuiz, onReviewResult }) => {
             <div className="w-full max-w-2xl mb-10">
                 <div className="flex justify-between text-xs font-mono text-gray-500 mb-2">
                     <span>STUDY SET PROGRESS</span>
-                    <span className="flex space-x-4">
-                        <span className="text-green-500">{knownCards.size} MASTERED</span>
-                        <span className="text-red-400">{reviewCards.size} TO REVIEW</span>
-                    </span>
+                    <span className="flex space-x-4"><span className="text-green-500">{knownCards.size} MASTERED</span><span className="text-red-400">{reviewCards.size} TO REVIEW</span></span>
                 </div>
                 <div className="h-2 w-full bg-surface-400 rounded-xl overflow-hidden">
                     <div className="h-full bg-indigo-500 transition-all duration-500 ease-out" style={{ width: `${progressPercentage}%` }} />
@@ -218,24 +86,16 @@ const FlashcardsViewer = ({ content, onSwitchToQuiz, onReviewResult }) => {
                 <motion.div className="w-full h-full relative preserve-3d cursor-pointer" animate={{ rotateY: isFlipped ? 180 : 0 }} transition={{ type: "spring", stiffness: 260, damping: 20 }} onClick={() => setIsFlipped(!isFlipped)}>
                     <div className={`absolute w-full h-full backface-hidden bg-surface-200 border ${isNeedsReview ? 'border-red-500/60 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'border-surface-400 hover:border-indigo-500/50'} rounded-xl p-10 flex flex-col items-center justify-center text-center shadow-md transition-colors`}>
                         <span className="absolute top-6 left-6 text-xs font-bold uppercase tracking-widest text-indigo-400 bg-indigo-900/30 px-3 py-1 rounded-md border border-indigo-800">{currentCard?.tag || "Concept"}</span>
-                        {isNeedsReview && (
-                            <span className="absolute top-6 right-6 text-xs font-bold uppercase tracking-widest text-red-400 bg-red-900/30 px-3 py-1 rounded-md border border-red-800 flex items-center">
-                                <AlertCircle className="w-3 h-3 mr-1" /> Needs Review
-                            </span>
-                        )}
+                        {isNeedsReview && <span className="absolute top-6 right-6 text-xs font-bold uppercase tracking-widest text-red-400 bg-red-900/30 px-3 py-1 rounded-md border border-red-800 flex items-center"><AlertCircle className="w-3 h-3 mr-1" /> Needs Review</span>}
                         <HelpCircle className={`w-12 h-12 mb-6 ${isNeedsReview ? 'text-red-500/50' : 'text-gray-600'}`} />
                         <h2 className="text-3xl font-bold text-white leading-tight">{currentCard?.question}</h2>
                         <span className="absolute bottom-6 text-xs text-gray-500 font-mono animate-pulse flex items-center"><RotateCw className="w-4 h-4 mr-2" /> Click to reveal answer</span>
                     </div>
-
                     <div className="absolute w-full h-full backface-hidden bg-indigo-950/40 border border-indigo-700/50 rounded-xl p-10 flex flex-col justify-center shadow-md overflow-y-auto" style={{ transform: "rotateY(180deg)" }}>
                         <span className="text-xs font-bold uppercase tracking-widest text-indigo-300 mb-4 flex items-center"><Sparkles className="w-4 h-4 mr-2" /> Answer</span>
-                        <div className="text-lg text-gray-200 leading-relaxed">
-                            {currentCard?.answer.split('\n').map((line, i) => <p key={i} className="mb-2">{line}</p>)}
-                        </div>
+                        <div className="text-lg text-gray-200 leading-relaxed">{currentCard?.answer.split('\n').map((line, i) => <p key={i} className="mb-2">{line}</p>)}</div>
                     </div>
                 </motion.div>
-
                 <AnimatePresence>
                     {isComplete && (
                         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="absolute inset-0 bg-surface-200/95 backdrop-blur-md rounded-xl z-50 flex flex-col items-center justify-center text-center p-10 border border-surface-400 shadow-xl">
@@ -271,15 +131,12 @@ const QuizViewer = ({ content, onReviewResult }) => {
     const [score, setScore] = useState(0);
     const [isComplete, setIsComplete] = useState(false);
 
-    const loadAndShuffleQuestions = useCallback(() => {
+    useEffect(() => {
         const parsed = parseJsonContent(content);
         if (parsed && Array.isArray(parsed)) {
-            const shuffled = parsed.map(q => ({ ...q, options: q.options ? [...q.options].sort(() => Math.random() - 0.5) : [] }));
-            setQuestions(shuffled);
+            setQuestions(parsed.map(q => ({ ...q, options: q.options ? [...q.options].sort(() => Math.random() - 0.5) : [] })));
         }
     }, [content]);
-
-    useEffect(() => { loadAndShuffleQuestions(); }, [loadAndShuffleQuestions]);
 
     if (!questions || questions.length === 0) return <div className="p-6 text-red-400">Failed to parse Quiz.</div>;
     const currentQ = questions[currentIndex];
@@ -307,7 +164,7 @@ const QuizViewer = ({ content, onReviewResult }) => {
                     <div className="w-full bg-surface-400 rounded-xl h-4 mb-8 overflow-hidden">
                         <div className="bg-green-500 h-full transition-all" style={{ width: `${(score / questions.length) * 100}%` }}></div>
                     </div>
-                    <button onClick={() => { loadAndShuffleQuestions(); setCurrentIndex(0); setScore(0); setIsComplete(false); setSelectedOption(null); setIsSubmitted(false); }} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-colors cursor-pointer">Retake Quiz</button>
+                    <button onClick={() => { setCurrentIndex(0); setScore(0); setIsComplete(false); setSelectedOption(null); setIsSubmitted(false); }} className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-colors cursor-pointer">Retake Quiz</button>
                 </div>
             </div>
         );
@@ -326,10 +183,8 @@ const QuizViewer = ({ content, onReviewResult }) => {
                         let btnClass = "w-full text-left px-6 py-4 rounded-xl border transition-all text-base font-medium cursor-pointer ";
                         const isCorrect = checkIsCorrect(opt);
                         const isSelected = selectedOption === opt;
-
-                        if (!isSubmitted) {
-                            btnClass += isSelected ? "bg-blue-600/20 border-blue-500 text-blue-100" : "bg-surface-300 border-surface-400 hover:border-gray-500 text-gray-300";
-                        } else {
+                        if (!isSubmitted) btnClass += isSelected ? "bg-blue-600/20 border-blue-500 text-blue-100" : "bg-surface-300 border-surface-400 hover:border-gray-500 text-gray-300";
+                        else {
                             if (isCorrect) btnClass += "bg-green-900/30 border-green-500 text-green-200";
                             else if (isSelected) btnClass += "bg-red-900/30 border-red-500 text-red-200";
                             else btnClass += "bg-surface-300 border-surface-400 text-gray-500 opacity-50 cursor-not-allowed";
@@ -360,17 +215,17 @@ const QuizViewer = ({ content, onReviewResult }) => {
     );
 };
 
-export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKey }) {
+export default function ArtifactsPanel({ workspaceId, refreshKey }) {
     const [artifacts, setArtifacts] = useState([]);
     const [documents, setDocuments] = useState([]); 
     const [selectedDocs, setSelectedDocs] = useState([]); 
 
     const artifactTypeConfig = [
         { id: 'markdown', label: 'Guide', icon: FileText, activeClass: 'bg-blue-900/40 text-blue-400 border-blue-800/50 shadow-sm' },
-        { id: 'graph', label: 'Map', icon: Network, activeClass: 'bg-purple-900/40 text-purple-400 border-purple-800/50 shadow-sm' },
         { id: 'flashcards', label: 'Cards', icon: CreditCard, activeClass: 'bg-indigo-900/40 text-indigo-400 border-indigo-800/50 shadow-sm' },
         { id: 'quiz', label: 'Quiz', icon: CheckSquare, activeClass: 'bg-emerald-900/40 text-emerald-400 border-emerald-800/50 shadow-sm' }
     ];
+    
     const [selectedTypes, setSelectedTypes] = useState(artifactTypeConfig.map(t => t.id));
     const [isGenerating, setIsGenerating] = useState(false);
     const [showForm, setShowForm] = useState(false);
@@ -386,7 +241,7 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKe
             const response = await fetch('http://localhost:8000/api/artifacts/', { headers: { 'Authorization': `Token ${token}` } });
             if (response.ok) {
                 const data = await response.json();
-                setArtifacts(data.filter(a => a.workspace?.toString() === workspaceId?.toString()));
+                setArtifacts(data.filter(a => a.workspace?.toString() === workspaceId?.toString() && a.artifact_type !== 'graph'));
             }
         } catch (error) { console.error("Failed to fetch artifacts", error); }
     };
@@ -401,19 +256,6 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKe
                 setSelectedDocs(data.documents.map(d => d.id.toString()));
             }
         } catch (error) { console.error("Failed to fetch documents", error); }
-    };
-
-    const handleProgressUpdate = async (artifactId, newProgress) => {
-        setArtifacts(prev => prev.map(a => a.id === artifactId ? { ...a, progress_state: newProgress } : a));
-        if (viewingArtifact?.id === artifactId) setViewingArtifact(prev => ({ ...prev, progress_state: newProgress }));
-        try {
-            const token = localStorage.getItem('auth_token');
-            await fetch(`http://localhost:8000/api/artifacts/${artifactId}/update_progress/`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Token ${token}` },
-                body: JSON.stringify({ progress_state: newProgress })
-            });
-        } catch (error) { console.error("Failed to save progress", error); }
     };
 
     const handleReviewResult = async (artifactId, tag, correct) => {
@@ -462,7 +304,6 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKe
     };
 
     if (viewingArtifact) {
-        const isGraph = viewingArtifact.artifact_type === 'graph';
         const isFlashcard = viewingArtifact.artifact_type === 'flashcards';
         const isQuiz = viewingArtifact.artifact_type === 'quiz';
 
@@ -473,14 +314,13 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKe
                         <ChevronLeft className="w-4 h-4 mr-1" /> Back to Library
                     </button>
                     <div className="flex items-center">
-                        {isGraph ? <Network className="w-5 h-5 text-purple-400 mr-3" /> : isFlashcard ? <CreditCard className="w-5 h-5 text-indigo-400 mr-3" /> : isQuiz ? <CheckSquare className="w-5 h-5 text-emerald-400 mr-3" /> : <FileText className="w-5 h-5 text-blue-500 mr-3" />}
+                        {isFlashcard ? <CreditCard className="w-5 h-5 text-indigo-400 mr-3" /> : isQuiz ? <CheckSquare className="w-5 h-5 text-emerald-400 mr-3" /> : <FileText className="w-5 h-5 text-blue-500 mr-3" />}
                         <h3 className="text-white font-bold text-lg truncate max-w-md">{viewingArtifact.title}</h3>
                     </div>
                     <div className="w-24"></div>
                 </div>
                 <div className="flex-1 overflow-hidden relative">
-                    {isGraph ? <KnowledgeGraphViewer artifact={viewingArtifact} onProgressUpdate={handleProgressUpdate} onResourceClick={onResourceClick} /> 
-                    : isFlashcard ? <FlashcardsViewer content={viewingArtifact.content} onSwitchToQuiz={() => setViewingArtifact(artifacts.find(a => a.artifact_type === 'quiz' && (a.title === viewingArtifact.title.replace('Flashcards: ', 'Quiz: ') || a.title === viewingArtifact.title)))} onReviewResult={(tag, correct) => handleReviewResult(viewingArtifact.id, tag, correct)} /> 
+                    {isFlashcard ? <FlashcardsViewer content={viewingArtifact.content} onSwitchToQuiz={() => setViewingArtifact(artifacts.find(a => a.artifact_type === 'quiz' && (a.title === viewingArtifact.title.replace('Flashcards: ', 'Quiz: ') || a.title === viewingArtifact.title)))} onReviewResult={(tag, correct) => handleReviewResult(viewingArtifact.id, tag, correct)} /> 
                     : isQuiz ? <QuizViewer content={viewingArtifact.content} onReviewResult={(tag, correct) => handleReviewResult(viewingArtifact.id, tag, correct)} /> 
                     : <MarkdownViewer artifact={viewingArtifact} />}
                 </div>
@@ -503,9 +343,6 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKe
                         <div className="mb-4">
                             <div className="flex justify-between items-end mb-3">
                                 <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block">Select Artifacts to Generate</label>
-                                <button type="button" onClick={() => setSelectedTypes(selectedTypes.length === 4 ? [] : ['markdown', 'graph', 'flashcards', 'quiz'])} className="text-xs font-bold text-blue-500 hover:text-blue-400 cursor-pointer">
-                                    {selectedTypes.length === 4 ? 'Deselect All' : 'Select All'}
-                                </button>
                             </div>
                             <div className="flex space-x-3 bg-surface-100 p-1.5 rounded-xl border border-surface-400">
                                 {artifactTypeConfig.map(type => {
@@ -526,7 +363,7 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKe
                                 {documents.map(doc => (
                                     <label key={doc.id} className="flex items-center space-x-3 p-2 hover:bg-surface-300 rounded-md cursor-pointer text-sm text-gray-300 transition-colors">
                                         <input type="checkbox" checked={selectedDocs.includes(doc.id.toString())} onChange={(e) => { const idStr = doc.id.toString(); if(e.target.checked) setSelectedDocs([...selectedDocs, idStr]); else setSelectedDocs(selectedDocs.filter(id => id !== idStr)); }} className="w-4 h-4 rounded border-surface-400 text-blue-600 bg-surface-200 focus:ring-0 cursor-pointer" />
-                                        <span className="truncate font-medium">{doc.name}</span>
+                                        <span className="truncate font-medium">{doc.title}</span>
                                     </label>
                                 ))}
                                 {documents.length === 0 && <span className="text-sm text-gray-600 italic px-2">No documents in workspace...</span>}
@@ -545,7 +382,7 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKe
                     <EmptyState 
                         icon={Sparkles} 
                         title="Your library is empty." 
-                        message="Generate a map, guide, or flashcards to get started." 
+                        message="Generate a guide or flashcards to get started." 
                         actionText="Generate New"
                         onAction={() => setShowForm(true)}
                     />
@@ -555,8 +392,8 @@ export default function ArtifactsPanel({ workspaceId, onResourceClick, refreshKe
                             <div key={artifact.id} onClick={() => setViewingArtifact(artifact)} className="bg-surface-200 hover:bg-surface-300 border border-surface-400 hover:border-gray-500 rounded-xl p-5 cursor-pointer transition-all flex flex-col group shadow-sm">
                                 <div className="flex items-start justify-between mb-3">
                                     <div className="flex items-center overflow-hidden">
-                                        <div className={`p-2 rounded-md mr-3 shrink-0 ${artifact.artifact_type === 'graph' ? 'bg-purple-900/30' : artifact.artifact_type === 'flashcards' ? 'bg-indigo-900/30' : artifact.artifact_type === 'quiz' ? 'bg-emerald-900/30' : 'bg-blue-900/30'}`}>
-                                            {artifact.artifact_type === 'graph' ? <Network className="w-5 h-5 text-purple-400" /> : artifact.artifact_type === 'flashcards' ? <CreditCard className="w-5 h-5 text-indigo-400" /> : artifact.artifact_type === 'quiz' ? <CheckSquare className="w-5 h-5 text-emerald-400" /> : <FileText className="w-5 h-5 text-blue-500" />}
+                                        <div className={`p-2 rounded-md mr-3 shrink-0 ${artifact.artifact_type === 'flashcards' ? 'bg-indigo-900/30' : artifact.artifact_type === 'quiz' ? 'bg-emerald-900/30' : 'bg-blue-900/30'}`}>
+                                            {artifact.artifact_type === 'flashcards' ? <CreditCard className="w-5 h-5 text-indigo-400" /> : artifact.artifact_type === 'quiz' ? <CheckSquare className="w-5 h-5 text-emerald-400" /> : <FileText className="w-5 h-5 text-blue-500" />}
                                         </div>
                                         <span className="text-gray-100 font-bold text-base truncate">{artifact.title}</span>
                                     </div>

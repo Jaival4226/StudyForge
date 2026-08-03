@@ -2,28 +2,20 @@
 
 @theme {
   /* 4-Step Surface Scale */
-  --color-surface-100: #050505; /* Deepest background (Left Panel, Main App) */
-  --color-surface-200: #0B0D17; /* Base panels (Right Panel, Forms) */
-  --color-surface-300: #111827; /* Elevated elements (Cards, Inputs) */
-  --color-surface-400: #1f2937; /* Borders and high-contrast separators */
+  --color-surface-100: #050505;
+  --color-surface-200: #0B0D17;
+  --color-surface-300: #111827;
+  --color-surface-400: #1f2937;
 
   /* Unified Typography */
   --font-sans: 'Inter', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
   /* Restrict Border Radii */
-  --radius-md: 0.5rem; /* Inputs, small buttons, tags */
-  --radius-xl: 1rem;   /* Modals, panels, flashcards, big buttons */
+  --radius-md: 0.5rem;
+  --radius-xl: 1rem;
 }
 
-/* Retain Required 3D Utilities for Flashcards */
-.perspective-1000 {
-  perspective: 1000px;
-}
-
-.preserve-3d {
-  transform-style: preserve-3d;
-}
-
-.backface-hidden {
-  backface-visibility: hidden;
-}
+.perspective-1000 { perspective: 1000px; }
+.preserve-3d { transform-style: preserve-3d; }
+.backface-hidden { backface-visibility: hidden; }

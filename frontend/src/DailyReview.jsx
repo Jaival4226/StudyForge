@@ -1,7 +1,9 @@
+// frontend/src/DailyReview.jsx
+
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Sparkles, CheckCircle2, RotateCw, BrainCircuit, Video, FileText } from 'lucide-react';
-import { EmptyState, LoadingState } from './components/SharedUI'; // <-- Added
+import { EmptyState, LoadingState } from './components/SharedUI';
 
 export default function DailyReview({ workspaceId, isActive, onResourceClick }) {
     const [items, setItems] = useState([]);
@@ -83,7 +85,7 @@ export default function DailyReview({ workspaceId, isActive, onResourceClick }) 
                         message="You have no overdue concepts to review right now."
                         actionText="Refresh Queue"
                         onAction={fetchDueItems}
-                        actionColor="bg-emerald-600 hover:bg-emerald-500" // Maintains emerald identity properly
+                        actionColor="bg-emerald-600 hover:bg-emerald-500"
                     />
                 </div>
             </div>

@@ -1,9 +1,8 @@
-// src/App.jsx
+// frontend/src/App.jsx
 
 import React, { useState, useRef, useEffect } from 'react';
 import YouTube from 'react-youtube';
-import ReactMarkdown from 'react-markdown';
-import { Send, Video, MessageSquare, LogOut, FolderSync, FileText } from 'lucide-react';
+import { Send, Video, MessageSquare, LogOut, FolderSync, FileText, Activity } from 'lucide-react';
 import Login from './Login';
 import UploadZone from './UploadZone';
 import InviteCollaborator from './InviteCollaborator';
@@ -11,11 +10,12 @@ import ManageCollaborators from './ManageCollaborators';
 import ManageDocuments from './ManageDocuments';
 import ArtifactsPanel from './ArtifactsPanel';
 import DailyReview from './DailyReview';
+import CortexPanel from './CortexPanel';
 
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('auth_token'));
   const [refreshKey, setRefreshKey] = useState(0);
-  const [rightPanelTab, setRightPanelTab] = useState('chat');
+  const [rightPanelTab, setRightPanelTab] = useState('cortex');
   const [workspaces, setWorkspaces] = useState([]);
   const [workspaceId, setWorkspaceId] = useState('');
   const [activeMedia, setActiveMedia] = useState({ type: null, src: '', pdfFile: '', loc: null, timestamp: Date.now() });
@@ -172,8 +172,6 @@ export default function App() {
     if (!query.trim() || !workspaceId) return;
 
     const userQuery = query;
-    
-    // Inject user message and an empty AI placeholder to stream into
     setChatHistory(prev => [...prev, { role: 'user', text: userQuery }, { role: 'ai', text: '' }]);
     setQuery('');
     setLoading(true);
@@ -195,7 +193,6 @@ export default function App() {
         return;
       }
 
-      // Read streaming text response
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let aiText = '';
@@ -296,7 +293,6 @@ export default function App() {
           <div className="w-full aspect-video bg-surface-200 rounded-xl overflow-hidden border border-surface-400 shadow-sm flex items-center justify-center shrink-0">
             {activeMedia.type === 'video' ? (
               <YouTube
-                key={activeMedia.src}
                 videoId={activeMedia.src}
                 opts={{ width: '100%', height: '100%', playerVars: { autoplay: 1 } }}
                 onReady={onPlayerReady}
@@ -356,6 +352,9 @@ export default function App() {
 
         <section className={`transition-all duration-300 ease-in-out flex flex-col bg-surface-200 ${activeMedia.src ? 'h-[60vh] lg:h-full lg:w-1/2' : 'h-[70vh] lg:h-full lg:w-2/3'}`}>
           <div className="flex justify-center items-center py-3 bg-surface-200 border-b border-surface-400 shrink-0 space-x-3">
+            <button onClick={() => setRightPanelTab('cortex')} className={`px-6 py-2 rounded-xl text-sm font-bold transition-colors cursor-pointer flex items-center ${rightPanelTab === 'cortex' ? 'bg-blue-600 text-white shadow-sm' : 'bg-surface-300 text-gray-400 hover:text-white border border-surface-400'}`}>
+              <Activity className="w-4 h-4 mr-2" /> Cortex
+            </button>
             <button onClick={() => setRightPanelTab('chat')} className={`px-6 py-2 rounded-xl text-sm font-bold transition-colors cursor-pointer ${rightPanelTab === 'chat' ? 'bg-blue-600 text-white shadow-sm' : 'bg-surface-300 text-gray-400 hover:text-white border border-surface-400'}`}>
               AI Chat
             </button>
@@ -365,6 +364,10 @@ export default function App() {
             <button onClick={() => setRightPanelTab('review')} className={`px-6 py-2 rounded-xl text-sm font-bold transition-colors cursor-pointer ${rightPanelTab === 'review' ? 'bg-blue-600 text-white shadow-sm' : 'bg-surface-300 text-gray-400 hover:text-white border border-surface-400'}`}>
               Daily Review
             </button>
+          </div>
+
+          <div className={`flex-1 overflow-hidden ${rightPanelTab === 'cortex' ? 'block' : 'hidden'}`}>
+            <CortexPanel workspaceId={workspaceId} onResourceClick={handleGraphResourceClick} />
           </div>
 
           <div className={`flex-1 flex flex-col h-full overflow-hidden ${rightPanelTab === 'chat' ? 'block' : 'hidden'}`}>

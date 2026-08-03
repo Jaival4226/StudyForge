@@ -1,4 +1,4 @@
-// src/ManageDocuments.jsx
+// frontend/src/ManageDocuments.jsx
 import React, { useState, useEffect } from 'react';
 import { FileText, Trash2 } from 'lucide-react';
 
@@ -24,7 +24,7 @@ export default function ManageDocuments({ workspaceId, refreshKey }) {
   };
 
   const handleDelete = async (documentId) => {
-    if (isDeleting) return; // Prevent double clicks
+    if (isDeleting) return;
     setIsDeleting(true);
     
     try {
@@ -39,11 +39,10 @@ export default function ManageDocuments({ workspaceId, refreshKey }) {
       });
       
       if (response.ok) {
-        // Refresh the list immediately after a successful deletion
         fetchDocuments();
       } else {
         const data = await response.json();
-        setError(data.error || 'Failed to delete document. Are you the owner?');
+        setError(data.error || 'Failed to delete document.');
       }
     } catch (err) {
       setError('Network error.');
@@ -52,7 +51,6 @@ export default function ManageDocuments({ workspaceId, refreshKey }) {
     }
   };
 
-  // Run whenever the workspace changes, or if App.jsx triggers a refresh
   useEffect(() => {
     if (workspaceId) {
       fetchDocuments();
@@ -74,13 +72,14 @@ export default function ManageDocuments({ workspaceId, refreshKey }) {
         <ul className="space-y-2 max-h-48 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-gray-700">
           {documents.map((doc) => (
             <li key={doc.id} className="flex items-center justify-between bg-gray-900 px-3 py-2 rounded-lg border border-gray-700">
-              <span className="text-sm text-gray-300 truncate pr-2" title={doc.name}>
-                {doc.name}
+              {/* FIXED: Changed doc.name to doc.title */}
+              <span className="text-sm text-gray-300 truncate pr-2" title={doc.title}>
+                {doc.title}
               </span>
               <button 
                 onClick={() => handleDelete(doc.id)}
                 disabled={isDeleting}
-                className="text-gray-500 hover:text-red-400 transition-colors shrink-0 disabled:opacity-50"
+                className="text-gray-500 hover:text-red-400 transition-colors shrink-0 disabled:opacity-50 cursor-pointer"
                 title="Delete Document"
               >
                 <Trash2 className="w-4 h-4" />

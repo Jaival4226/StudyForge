@@ -29,7 +29,7 @@ class AIEngine:
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str:
-                    print(f"  [AI Engine] API Key {current_key_index + 1} issue encountered. Rotating to next key...")
+                    print(f"  [AI Engine] API Key {current_key_index + 1} issue encountered. Rotating...")
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
                     time.sleep(1)
@@ -84,13 +84,11 @@ class AIEngine:
         Current User Query: {user_query}
         """
 
-        # Save user message immediately before streaming
         mongo_service.save_message(workspace_id, user_id, role="user", text=user_query)
 
         global current_key_index
         attempts = 0
         max_attempts = len(API_KEYS) * 3 
-        
         stream_iter = None
         first_chunk_text = ""
 
@@ -99,7 +97,6 @@ class AIEngine:
                 genai.configure(api_key=API_KEYS[current_key_index])
                 model = genai.GenerativeModel('gemini-3.6-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
                 
-                # Start the stream and force the first chunk to catch quota/routing errors immediately
                 stream = model.generate_content(system_prompt, stream=True)
                 stream_iter = iter(stream)
                 first_chunk = next(stream_iter)
@@ -108,7 +105,6 @@ class AIEngine:
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str or "stopiteration" in error_str:
-                    print(f"  [AI Engine] API Key {current_key_index + 1} issue starting stream. Rotating...")
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
                     time.sleep(1)
@@ -125,28 +121,25 @@ class AIEngine:
             return
 
         accumulated_text = ""
-        
         try:
-            # Yield the initial chunk we successfully pulled
             if first_chunk_text:
                 accumulated_text += first_chunk_text
                 yield first_chunk_text
                 
-            # Stream remaining chunks
             for chunk in stream_iter:
                 if chunk.text:
                     accumulated_text += chunk.text
                     yield chunk.text
         except Exception as e:
-            error_msg = f"\n\n[Stream interrupted mid-generation: {str(e)}]"
+            error_msg = f"\n\n[Stream interrupted: {str(e)}]"
             accumulated_text += error_msg
             yield error_msg
         finally:
-            # Persist the fully accumulated text string to MongoDB
             mongo_service.save_message(workspace_id, user_id, role="ai", text=accumulated_text)
 
     @staticmethod
     def generate_artifact(workspace_id, user_query, artifact_type='markdown', selected_doc_ids=None):
+        # ... (Existing generation logic completely untouched) ...
         context_results = VectorStoreService.query_workspace_context(
             workspace_id=workspace_id, 
             query_text=user_query, 
