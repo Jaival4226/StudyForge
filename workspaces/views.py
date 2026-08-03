@@ -4,6 +4,7 @@ import json
 import traceback
 from django.http import StreamingHttpResponse
 from django.contrib.auth.models import User
+from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -27,8 +28,8 @@ from .mongo_service import ChatMemoryService
 # AUTHENTICATION ENDPOINTS
 # ==========================================
 
-@api_view(['POST'])
-@permission_classes([AllowAny])
+@api_view(['POST'])               # <--- This MUST be on top
+@permission_classes([AllowAny])   # <--- This MUST be below it
 def register_user(request):
     username = request.data.get('username')
     password = request.data.get('password')
@@ -42,6 +43,12 @@ def register_user(request):
     user = User.objects.create_user(username=username, password=password)
     token, _ = Token.objects.get_or_create(user=user)
     
+    # Automatically create a default workspace for the brand new user!
+    Workspace.objects.create(
+        title=f"{username.capitalize()}'s Workspace", 
+        owner=user
+    )
+    
     return Response({'token': token.key}, status=status.HTTP_201_CREATED)
 
 
@@ -50,8 +57,16 @@ def register_user(request):
 # ==========================================
 
 class WorkspaceViewSet(viewsets.ModelViewSet):
-    queryset = Workspace.objects.all().order_by('-created_at')
     serializer_class = WorkspaceSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_authenticated:
+            # Only return workspaces this user owns OR was explicitly invited to
+            return Workspace.objects.filter(
+                Q(owner=user) | Q(collaborators=user)
+            ).distinct().order_by('-created_at')
+        return Workspace.objects.none()
 
     @action(detail=True, methods=['post'])
     def chat(self, request, pk=None):
@@ -169,8 +184,17 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         doc_id = request.data.get('document_id')
         try:
             doc = Document.objects.get(id=doc_id, workspace_id=pk)
+            
+            # 1. PURGE the ghost chunks from ChromaDB!
+            VectorStoreService.delete_document_chunks(pk, doc.id)
+            
+            # 2. Delete the SQL document
             doc.delete()
-            return Response({'message': 'Document deleted.'})
+            
+            # 3. Clean up the graph (delete nodes that no longer have any source material)
+            ConceptNode.objects.filter(workspace_id=pk, resources__isnull=True).delete()
+            
+            return Response({'message': 'Document fully purged.'})
         except Document.DoesNotExist:
             return Response({'error': 'Document not found.'}, status=404)
 
@@ -181,9 +205,24 @@ class WorkspaceViewSet(viewsets.ModelViewSet):
         
         review_items = []
         for tag in due_tags:
-            chunks = VectorStoreService.query_workspace_context(workspace_id=pk, query_text=tag, n_results=1)
-            snippet = chunks[0]['text'][:300] + "..." if chunks else "Definition context missing."
-            location = chunks[0]['location'] if chunks else "Unknown Source"
+            node = ConceptNode.objects.filter(workspace_id=pk, label__iexact=tag).first()
+            if not node:
+                node = ConceptNode.objects.filter(workspace_id=pk, canonical_tag__iexact=tag).first()
+                
+            if node:
+                snippet = node.details if node.details else node.summary
+                first_resource = node.resources.first()
+                location = first_resource.source_tag if first_resource else "Unknown Source"
+            else:
+                chunks = VectorStoreService.query_workspace_context(
+                    workspace_id=pk, 
+                    query_text=tag, 
+                    n_results=1,
+                    distance_threshold=2.0 
+                )
+                snippet = chunks[0]['text'][:300] + "..." if chunks else "Definition context missing."
+                location = chunks[0]['location'] if chunks else "Unknown Source"
+                
             review_items.append({"tag": tag, "snippet": snippet, "location": location})
             
         return Response({"review_items": review_items})
@@ -253,7 +292,8 @@ class DocumentViewSet(viewsets.ModelViewSet):
         try:
             chunks = []
             if document.type == 'pdf' and document.file_upload:
-                chunks = IngestionEngine.process_pdf(document.file_upload.path)
+                # FIXED: Pass the filename here
+                chunks = IngestionEngine.process_pdf(document.file_upload.path, filename=document.file_upload.name)
             elif document.type == 'video' and document.source_url:
                 chunks = IngestionEngine.process_youtube(document.source_url)
 
@@ -277,7 +317,6 @@ class FileUploadView(APIView):
         if 'workspace' not in data and 'workspace_id' in data:
             data['workspace'] = data['workspace_id']
 
-        # Intercept frontend media types and map them to the serializer choices
         if data.get('type') == 'youtube':
             data['type'] = 'video'
         elif data.get('type') == 'file':
@@ -320,7 +359,8 @@ class FileUploadView(APIView):
             try:
                 chunks = []
                 if document.type == 'pdf' and document.file_upload:
-                    chunks = IngestionEngine.process_pdf(document.file_upload.path)
+                    # FIXED: Pass the filename here
+                    chunks = IngestionEngine.process_pdf(document.file_upload.path, filename=document.file_upload.name)
                 elif document.type == 'video' and document.source_url:
                     chunks = IngestionEngine.process_youtube(document.source_url)
 

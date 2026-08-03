@@ -11,14 +11,11 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
     const [selectedNodeData, setSelectedNodeData] = useState(null);
     const [cortexStats, setCortexStats] = useState({ total: 0, mastered: 0, review: 0, new: 0 });
     
-    // NEW: Graph Switcher State
     const [selectedDocFilter, setSelectedDocFilter] = useState('ALL');
 
     const currentNodesRef = useRef([]);
     const currentEdgesRef = useRef([]);
     
-    // FIXED: Replaced aggressive localStorage with a clean session memory cache.
-    // This prevents mastery states from bleeding across different users/logouts.
     const localMasteryOverrides = useRef({}); 
 
     const loadCortex = async (forceUpdate = false) => {
@@ -39,7 +36,6 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                     const isNew = (Date.now() - new Date(n.data.updated_at).getTime()) < 3600000;
                     const isOnPath = pData.path.map(String).includes(n.id);
                     
-                    // Use safe session memory to stop the 5-second polling from flickering colors
                     const backendState = n.data.mastery_state;
                     const localState = localMasteryOverrides.current[n.data.label];
                     const finalState = localState || backendState;
@@ -88,11 +84,12 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
 
                     const d3Links = styledEdges.map(e => ({ source: e.source, target: e.target, id: e.id }));
 
+                    // FIXED: Restored reasonable physics so it stays on screen
                     const simulation = forceSimulation(styledNodes)
-                        .force('charge', forceManyBody().strength(-15000)) 
+                        .force('charge', forceManyBody().strength(-2000)) 
                         .force('center', forceCenter(window.innerWidth / 2, window.innerHeight / 2))
-                        .force('link', forceLink(d3Links).id(d => d.id).distance(600))
-                        .force('collide', forceCollide().radius(250).iterations(8)) 
+                        .force('link', forceLink(d3Links).id(d => d.id).distance(250))
+                        .force('collide', forceCollide().radius(120).iterations(8)) 
                         .stop();
 
                     for (let i = 0; i < 500; i++) simulation.tick();
@@ -120,7 +117,6 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
 
     useEffect(() => {
         if (!workspaceId) return;
-        // Wipe session cache on workspace switch
         localMasteryOverrides.current = {}; 
         setSelectedDocFilter('ALL');
         loadCortex(true);
@@ -132,7 +128,6 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
         try {
             const token = localStorage.getItem('auth_token');
             
-            // Save to session memory
             localMasteryOverrides.current[tag] = isCorrect ? 'mastered' : 'weak';
             
             setNodes(prevNodes => {
@@ -207,7 +202,6 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
         )
     }), []);
 
-    // NEW: Compute available documents for the Graph Switcher
     const uniqueDocs = useMemo(() => {
         const docs = new Set();
         nodes.forEach(n => {
@@ -218,7 +212,6 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
         return Array.from(docs);
     }, [nodes]);
 
-    // NEW: Filter the active graph view based on the Switcher
     const filteredNodes = useMemo(() => {
         if (selectedDocFilter === 'ALL') return nodes;
         return nodes.filter(n => n.data.resources?.some(r => r.title === selectedDocFilter));
@@ -245,7 +238,6 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                         <Activity className="w-4 h-4 mr-2 text-blue-500" /> Cortex State
                     </span>
                     
-                    {/* NEW: The Graph Switcher UI */}
                     <div className="flex items-center space-x-4">
                         <div className="flex items-center bg-surface-300 rounded-md border border-surface-400 px-2 overflow-hidden">
                             <Filter className="w-3 h-3 text-gray-400 mr-2" />
@@ -323,11 +315,9 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                                         {selectedNodeData.resources.map((res, idx) => (
                                             <button
                                                 key={idx}
-                                                // FIXED: Forcefully constructs the exact bracket tag expected by the viewer
+                                                // FIXED: Remove the manual page string append. We pass the clean original source tag!
                                                 onClick={() => {
-                                                    const cleanTitle = res.title.endsWith('.pdf') ? res.title : `${res.title}.pdf`;
-                                                    const jumpTag = `[${cleanTitle}|Page 1]`;
-                                                    onResourceClick(jumpTag);
+                                                    onResourceClick(res.source_tag);
                                                 }}
                                                 className={`inline-flex items-center px-3 py-2 rounded-md text-xs font-bold transition-colors shadow-sm cursor-pointer text-white ${res.type === 'video' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-red-600 hover:bg-red-500'}`}
                                             >

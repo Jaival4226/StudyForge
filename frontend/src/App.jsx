@@ -1,5 +1,3 @@
-// frontend/src/App.jsx
-
 import React, { useState, useRef, useEffect } from 'react';
 import YouTube from 'react-youtube';
 import { Send, Video, MessageSquare, LogOut, FolderSync, FileText, Activity } from 'lucide-react';
@@ -80,7 +78,7 @@ export default function App() {
   const handleResourceClick = (source, loc) => {
     if (!source) return;
     const isVideo = source.length === 11 && !source.includes('.');
-    
+
     if (isVideo) {
       const seconds = timestampToSeconds(loc);
       if (activeMedia.type === 'video' && activeMedia.src === source && playerRef.current) {
@@ -91,10 +89,16 @@ export default function App() {
         setPendingSeek(seconds);
         setActiveMedia({ type: 'video', src: source, pdfFile: '', loc: seconds, timestamp: Date.now() });
       }
-    } else if (source.toLowerCase().includes('.pdf')) {
+    } else {
+      // Treats as PDF and handles missing extensions or folders
       const cleanLoc = loc ? loc.toString() : '';
       const pageNum = cleanLoc.replace(/page/gi, '').trim() || '1';
-      const pdfUrl = `http://localhost:8000/media/uploads/${source}#page=${pageNum}`;
+      
+      let pdfPath = source;
+      if (!pdfPath.includes('/')) pdfPath = `workspace_docs/${pdfPath}`;
+      if (!pdfPath.endsWith('.pdf')) pdfPath += '.pdf';
+
+      const pdfUrl = `http://localhost:8000/media/${pdfPath}#page=${pageNum}`;
       
       setActiveMedia({ 
         type: 'pdf', 
@@ -249,8 +253,8 @@ export default function App() {
     <div className="w-full h-screen bg-surface-100 text-gray-100 flex flex-col font-sans">
       <header className="w-full h-16 bg-surface-200 border-b border-surface-400 flex items-center justify-between px-6 shadow-sm shrink-0 z-10">
         <div className="flex items-center space-x-3">
-          <div className="bg-blue-600 p-2 rounded-xl font-bold text-white tracking-wider shadow-sm">AC</div>
-          <h1 className="text-xl font-bold tracking-tight text-white">Academic AI Workspace</h1>
+          <div className="bg-blue-600 p-2 rounded-xl font-bold text-white tracking-wider shadow-sm">SF</div>
+          <h1 className="text-xl font-bold tracking-tight text-white">Study Forge</h1>
         </div>
 
         <div className="flex items-center space-x-4">
@@ -264,7 +268,7 @@ export default function App() {
               {workspaces.length === 0 && <option value="">No Workspaces Available</option>}
               {workspaces.map(ws => (
                 <option key={ws.id} value={ws.id} className="bg-surface-300">
-                  {ws.title || ws.name || `Workspace ${ws.id}`}
+                  {ws.title || `Workspace ${ws.id}`} (ID: {ws.id})
                 </option>
               ))}
             </select>

@@ -1,5 +1,3 @@
-# workspaces/ai_engine.py
-
 import json
 import time
 import google.generativeai as genai
@@ -23,20 +21,17 @@ class AIEngine:
         while attempts < max_attempts:
             try:
                 genai.configure(api_key=API_KEYS[current_key_index])
-                # EMERGENCY FIX: Using the active, stable gemini-3.5-flash model
-                model = genai.GenerativeModel('gemini-3.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                # 🚨 CRITICAL FIX: Must be exactly 'gemini-1.5-flash'
+                model = genai.GenerativeModel('gemini-1.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
                 response = model.generate_content(system_prompt)
                 
-                # SLOWED DOWN: 12-second delay to guarantee you never hit rate limits during your demo
-                time.sleep(12)
                 return response.text
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str:
-                    print(f"  ⚠️ [AI Engine] API Key {current_key_index + 1} error: {e} | Rotating...")
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
-                    time.sleep(5)
+                    time.sleep(3)
                 else:
                     raise e
         raise Exception("All Gemini API keys have been exhausted or encountered routing errors.")
@@ -46,7 +41,8 @@ class AIEngine:
         context_results = VectorStoreService.query_workspace_context(
             workspace_id=workspace_id, 
             query_text=user_query, 
-            n_results=35
+            n_results=15, 
+            distance_threshold=2.0 
         )
 
         formatted_context = "WORKSPACE DOCUMENTS:\n\n"
@@ -58,7 +54,7 @@ class AIEngine:
             formatted_context = "I don't have any documents in this workspace to answer that."
 
         mongo_service = ChatMemoryService()
-        raw_history = mongo_service.get_chat_history(workspace_id, user_id)[-20:]
+        raw_history = mongo_service.get_chat_history(workspace_id, user_id)[-10:]
         
         formatted_memory = "PREVIOUS CONVERSATION HISTORY:\n"
         for msg in raw_history:
@@ -93,62 +89,55 @@ class AIEngine:
         global current_key_index
         attempts = 0
         max_attempts = len(API_KEYS) * 3 
-        stream_iter = None
-        first_chunk_text = ""
 
         while attempts < max_attempts:
             try:
                 genai.configure(api_key=API_KEYS[current_key_index])
-                model = genai.GenerativeModel('gemini-3.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                # 🚨 CRITICAL FIX: Must be exactly 'gemini-1.5-flash'
+                model = genai.GenerativeModel('gemini-1.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
                 
-                stream = model.generate_content(system_prompt, stream=True)
-                stream_iter = iter(stream)
-                first_chunk = next(stream_iter)
-                first_chunk_text = first_chunk.text
-                break
+                response = model.generate_content(system_prompt, stream=True)
+                iterator = iter(response)
+                first_chunk = next(iterator)
+                
+                accumulated_text = ""
+                if first_chunk.text:
+                    accumulated_text += first_chunk.text
+                    yield first_chunk.text
+                    
+                for chunk in iterator:
+                    if chunk.text:
+                        accumulated_text += chunk.text
+                        yield chunk.text
+                        
+                mongo_service.save_message(workspace_id, user_id, role="ai", text=accumulated_text)
+                return
+
             except Exception as e:
                 error_str = str(e).lower()
                 if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str or "stopiteration" in error_str:
-                    print(f"  ⚠️ [AI Engine Chat] API Key {current_key_index + 1} error: {e} | Rotating...")
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
-                    time.sleep(1)
+                    time.sleep(2)
+                    continue
                 else:
-                    error_msg = f"❌ Setup Error: {str(e)}"
+                    error_msg = f"\n\n❌ Chat Error: {str(e)}"
                     mongo_service.save_message(workspace_id, user_id, role="ai", text=error_msg)
                     yield error_msg
                     return
 
-        if attempts >= max_attempts or not stream_iter:
-            error_msg = "❌ All Gemini API keys have been exhausted or encountered routing errors."
-            mongo_service.save_message(workspace_id, user_id, role="ai", text=error_msg)
-            yield error_msg
-            return
-
-        accumulated_text = ""
-        try:
-            if first_chunk_text:
-                accumulated_text += first_chunk_text
-                yield first_chunk_text
-                
-            for chunk in stream_iter:
-                if chunk.text:
-                    accumulated_text += chunk.text
-                    yield chunk.text
-        except Exception as e:
-            error_msg = f"\n\n[Stream interrupted: {str(e)}]"
-            accumulated_text += error_msg
-            yield error_msg
-        finally:
-            mongo_service.save_message(workspace_id, user_id, role="ai", text=accumulated_text)
+        error_msg = "❌ All Gemini API keys have been exhausted or rate limited."
+        mongo_service.save_message(workspace_id, user_id, role="ai", text=error_msg)
+        yield error_msg
 
     @staticmethod
     def generate_artifact(workspace_id, user_query, artifact_type='markdown', selected_doc_ids=None):
         context_results = VectorStoreService.query_workspace_context(
             workspace_id=workspace_id, 
             query_text=user_query, 
-            n_results=35,
-            selected_doc_ids=selected_doc_ids 
+            n_results=20,
+            selected_doc_ids=selected_doc_ids,
+            distance_threshold=2.0
         )
 
         formatted_context = "WORKSPACE DOCUMENTS:\n\n"
