@@ -7,7 +7,7 @@ Study Forge ingests multi-modal educational content (YouTube lectures and local 
 ## 🚀 Key Features
 
 *   **Multi-Modal Ingestion Pipeline:** Automatically extracts and chunks text from local PDFs and YouTube URLs using `youtube_transcript_api` and `PyPDF2`.
-*   **Cortex Knowledge Graph:** An autonomous agent that extracts concepts, merges identical entities via mathematical vector distance (ChromaDB), and infers relationships to render a D3-physics simulated node graph.
+*   **Cortex Knowledge Graph:** An autonomous agent that extracts concepts, merges identical entities via high-speed mathematical vector distance (ChromaDB), and infers relationships to render a D3-physics simulated node graph.
 *   **Vector-Backed RAG Chat:** Ask questions directly to your workspace. The system pulls relevant context from ChromaDB and conversational memory from MongoDB to provide cited, accurate answers.
 *   **Artifact Synthesis:** Automatically generate detailed Markdown Study Guides, interactive Flashcards, and auto-grading Quizzes directly from your uploaded materials.
 *   **Spaced Repetition Engine:** A daily review system that tracks user mastery and dynamically schedules concept reviews based on retention performance.
@@ -16,19 +16,44 @@ Study Forge ingests multi-modal educational content (YouTube lectures and local 
 
 **Frontend Layer:**
 *   React 19 & Vite
-*   Tailwind CSS (Custom Violet/Slate Academic Theme)
+*   Tailwind CSS (Custom Light/Purple Academic Theme)
 *   React Flow & D3-Force (Graph Rendering & Physics)
 *   Framer Motion (Animations)
 
 **Backend & AI Layer:**
 *   Python & Django REST Framework (DRF)
-*   Google Gemini API (`gemini-1.5-flash`)
+*   Google Gemini API (`google-genai` SDK, Auto-Routing 3.x models)
 *   SentenceTransformers (`all-MiniLM-L6-v2`)
 
 **Database Architecture:**
 *   **SQLite:** Relational storage for Workspaces, Documents, Artifacts, and Mastery telemetry.
 *   **ChromaDB:** Persistent local vector storage for document semantic search and graph node embeddings.
 *   **MongoDB:** NoSQL document storage for continuous workspace chat history.
+
+---
+
+## ⚙️ Local Development Setup
+
+### 1. Prerequisites
+Ensure you have the following installed on your machine:
+*   Python 3.10+
+*   Node.js & npm
+*   MongoDB Community Server (running locally on port `27017`)
+
+### 2. Backend Installation (Django)
+
+Open a terminal in the root directory:
+
+```bash
+# Create and activate a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows use: venv\Scripts\activate
+
+# Install required Python dependencies
+pip install django djangorestframework django-cors-headers chromadb sentence-transformers youtube-transcript-api PyPDF2 google-genai pymongo python-dotenv
+
+# Create the environment file
+touch .env
 
 ---
 
