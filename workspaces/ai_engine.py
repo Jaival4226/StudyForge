@@ -1,6 +1,7 @@
 import json
 import time
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from django.conf import settings
 from .vector_store import VectorStoreService
 from .mongo_service import ChatMemoryService
@@ -9,32 +10,44 @@ API_KEYS = getattr(settings, 'GEMINI_API_KEYS', [])
 if not API_KEYS and hasattr(settings, 'GEMINI_API_KEY'):
     API_KEYS = [settings.GEMINI_API_KEY]
 
+# Auto-Model Router using active models
+MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite']
+
 current_key_index = 0
+current_model_index = 0
 
 class AIEngine:
     @staticmethod
     def _execute_with_fallback(system_prompt):
-        global current_key_index
+        global current_key_index, current_model_index
         attempts = 0
-        max_attempts = len(API_KEYS) * 3 
+        max_attempts = len(API_KEYS) * len(MODELS) 
 
         while attempts < max_attempts:
             try:
-                genai.configure(api_key=API_KEYS[current_key_index])
-                # 🚨 CRITICAL FIX: Must be exactly 'gemini-1.5-flash'
-                model = genai.GenerativeModel('gemini-1.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
-                response = model.generate_content(system_prompt)
+                client = genai.Client(api_key=API_KEYS[current_key_index])
+                active_model = MODELS[current_model_index]
                 
+                response = client.models.generate_content(
+                    model=active_model,
+                    contents=system_prompt,
+                    config=types.GenerateContentConfig(temperature=0.0)
+                )
                 return response.text
             except Exception as e:
                 error_str = str(e).lower()
-                if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str:
+                if "404" in error_str or "not found" in error_str:
+                    current_model_index = (current_model_index + 1) % len(MODELS)
+                    attempts += 1
+                    continue
+                elif "429" in error_str or "quota" in error_str or "exhausted" in error_str or "401" in error_str or "unauthenticated" in error_str:
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
-                    time.sleep(3)
+                    time.sleep(1)
+                    continue
                 else:
                     raise e
-        raise Exception("All Gemini API keys have been exhausted or encountered routing errors.")
+        raise Exception("All Gemini API keys and model fallbacks have been exhausted.")
 
     @staticmethod
     def chat_with_workspace(workspace_id, user_query, user_id):
@@ -68,9 +81,10 @@ class AIEngine:
         
         CRITICAL BEHAVIORAL RULES:
         1. BE DOMAIN AGNOSTIC: You will be given context spanning many different subjects.
-        2. BE COMPREHENSIVE: Extract maximum value from the provided chunks. Write highly detailed responses.
-        3. FILE AWARENESS: The user's uploaded files are provided in "WORKSPACE DOCUMENTS". Treat them as file contents.
-        4. NO META-TALK / NO RAW VIDEO ID LEAKS.
+        2. BE COMPREHENSIVE BUT CLEAN: Write detailed responses but DO NOT use excessive formatting.
+        3. NO HEAVY FORMATTING: DO NOT use horizontal rules (---) and DO NOT use heading tags (###). Use simple paragraphs and basic bullet points.
+        4. FILE AWARENESS: The user's uploaded files are provided in "WORKSPACE DOCUMENTS". Treat them as file contents.
+        5. NO META-TALK / NO RAW VIDEO ID LEAKS.
         
         CRITICAL CITATION RULES:
         1. You MUST cite your sources using the EXACT string provided in the 'SOURCE_TAG'.
@@ -86,17 +100,21 @@ class AIEngine:
 
         mongo_service.save_message(workspace_id, user_id, role="user", text=user_query)
 
-        global current_key_index
+        global current_key_index, current_model_index
         attempts = 0
-        max_attempts = len(API_KEYS) * 3 
+        max_attempts = len(API_KEYS) * len(MODELS) 
 
         while attempts < max_attempts:
             try:
-                genai.configure(api_key=API_KEYS[current_key_index])
-                # 🚨 CRITICAL FIX: Must be exactly 'gemini-1.5-flash'
-                model = genai.GenerativeModel('gemini-1.5-flash', generation_config=genai.types.GenerationConfig(temperature=0.0))
+                client = genai.Client(api_key=API_KEYS[current_key_index])
+                active_model = MODELS[current_model_index]
                 
-                response = model.generate_content(system_prompt, stream=True)
+                response = client.models.generate_content_stream(
+                    model=active_model,
+                    contents=system_prompt,
+                    config=types.GenerateContentConfig(temperature=0.0)
+                )
+                
                 iterator = iter(response)
                 first_chunk = next(iterator)
                 
@@ -115,10 +133,14 @@ class AIEngine:
 
             except Exception as e:
                 error_str = str(e).lower()
-                if "429" in error_str or "quota" in error_str or "exhausted" in error_str or "resource" in error_str or "404" in error_str or "not found" in error_str or "stopiteration" in error_str:
+                if "404" in error_str or "not found" in error_str:
+                    current_model_index = (current_model_index + 1) % len(MODELS)
+                    attempts += 1
+                    continue
+                elif "429" in error_str or "quota" in error_str or "exhausted" in error_str or "401" in error_str or "unauthenticated" in error_str or "stopiteration" in error_str:
                     current_key_index = (current_key_index + 1) % len(API_KEYS)
                     attempts += 1
-                    time.sleep(2)
+                    time.sleep(1)
                     continue
                 else:
                     error_msg = f"\n\n❌ Chat Error: {str(e)}"
@@ -126,7 +148,7 @@ class AIEngine:
                     yield error_msg
                     return
 
-        error_msg = "❌ All Gemini API keys have been exhausted or rate limited."
+        error_msg = "❌ All Gemini API keys or models have been exhausted."
         mongo_service.save_message(workspace_id, user_id, role="ai", text=error_msg)
         yield error_msg
 
@@ -238,8 +260,10 @@ class AIEngine:
             4. Do NOT make them standard markdown web links. Just output the raw bracketed tag exactly as provided.
             
             FORMATTING RULES:
-            1. Use proper markdown spacing. Leave a blank empty line before and after headings, lists, and code blocks.
-            2. Ensure inline code `ticks` have spaces around them.
+            1. Use clean, minimal markdown spacing. 
+            2. STRICTLY PROHIBITED: Do not use horizontal rules (---).
+            3. STRICTLY PROHIBITED: Do not overuse headings (###). Use bold text for emphasis instead of heavy headers.
+            4. Ensure inline code `ticks` have spaces around them.
 
             {formatted_context}
             User Artifact Request: {user_query}

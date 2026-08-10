@@ -77,24 +77,26 @@ export default function App() {
 
   const handleResourceClick = (source, loc) => {
     if (!source) return;
-    const isVideo = source.length === 11 && !source.includes('.');
+    
+    // 🚨 FIX: Force trimming of invisible spaces so Video ID is always 11 chars!
+    const cleanSource = source.trim();
+    const isVideo = cleanSource.length === 11 && !cleanSource.includes('.');
 
     if (isVideo) {
-      const seconds = timestampToSeconds(loc);
-      if (activeMedia.type === 'video' && activeMedia.src === source && playerRef.current) {
+      const seconds = timestampToSeconds(loc.trim());
+      if (activeMedia.type === 'video' && activeMedia.src === cleanSource && playerRef.current) {
         playerRef.current.seekTo(seconds, true);
         playerRef.current.playVideo();
-        setActiveMedia({ type: 'video', src: source, pdfFile: '', loc: seconds, timestamp: Date.now() }); 
+        setActiveMedia({ type: 'video', src: cleanSource, pdfFile: '', loc: seconds, timestamp: Date.now() }); 
       } else {
         setPendingSeek(seconds);
-        setActiveMedia({ type: 'video', src: source, pdfFile: '', loc: seconds, timestamp: Date.now() });
+        setActiveMedia({ type: 'video', src: cleanSource, pdfFile: '', loc: seconds, timestamp: Date.now() });
       }
     } else {
-      // Treats as PDF and handles missing extensions or folders
-      const cleanLoc = loc ? loc.toString() : '';
+      const cleanLoc = loc ? loc.toString().trim() : '';
       const pageNum = cleanLoc.replace(/page/gi, '').trim() || '1';
       
-      let pdfPath = source;
+      let pdfPath = cleanSource;
       if (!pdfPath.includes('/')) pdfPath = `workspace_docs/${pdfPath}`;
       if (!pdfPath.endsWith('.pdf')) pdfPath += '.pdf';
 
@@ -102,7 +104,7 @@ export default function App() {
       
       setActiveMedia({ 
         type: 'pdf', 
-        pdfFile: source,
+        pdfFile: cleanSource,
         src: pdfUrl,
         loc: `Page ${pageNum}`,
         timestamp: Date.now() 
@@ -122,7 +124,8 @@ export default function App() {
     let cleanLink = link.replace(/^\[|\]$/g, ''); 
     if (cleanLink.includes('|')) {
       const [source, loc] = cleanLink.split('|');
-      handleResourceClick(source, loc);
+      // 🚨 FIX: Trim here too before passing it down
+      handleResourceClick(source.trim(), loc.trim());
     }
   };
 
@@ -135,8 +138,8 @@ export default function App() {
 
     while ((match = regex.exec(text)) !== null) {
       if (match.index > lastIndex) parts.push(text.substring(lastIndex, match.index));
-      const source = match[1];
-      const loc = match[2];
+      const source = match[1].trim();
+      const loc = match[2].trim();
       const isVideo = source.length === 11 && !source.includes('.');
 
       parts.push(

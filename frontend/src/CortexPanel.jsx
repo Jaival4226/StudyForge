@@ -47,17 +47,18 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                     else if (isWeak) rCount++;
                     else if (isNew) nCount++;
 
-                    let bg = '#1f2937', border = '#4b5563'; 
-                    if (isMastered) { bg = '#064e3b'; border = '#10b981'; } 
-                    else if (isWeak) { bg = '#450a0a'; border = '#ef4444'; } 
-                    else if (isNew) { bg = '#1e3a8a'; border = '#3b82f6'; } 
+                    // AESTHETIC LIGHT THEME COLORS FOR GRAPH NODES
+                    let bg = '#ffffff', border = '#cbd5e1', textColor = '#3b0764'; 
+                    if (isMastered) { bg = '#f0fdf4'; border = '#4ade80'; textColor = '#166534'; } 
+                    else if (isWeak) { bg = '#fef2f2'; border = '#f87171'; textColor = '#991b1b'; } 
+                    else if (isNew) { bg = '#faf5ff'; border = '#c084fc'; textColor = '#6b21a8'; } 
 
                     return {
                         ...n,
                         style: { 
                             backgroundColor: bg, borderColor: border, borderWidth: '2px', 
-                            color: '#fff', borderRadius: '1rem', padding: '15px', 
-                            boxShadow: isOnPath ? `0 0 15px ${border}80` : '0 4px 6px -1px rgba(0, 0, 0, 0.5)',
+                            color: textColor, borderRadius: '1rem', padding: '15px', 
+                            boxShadow: isOnPath ? `0 0 15px ${border}80` : '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
                             zIndex: 100 
                         },
                         data: { ...n.data, isNew: !isMastered && !isWeak && isNew, isMastered, isWeak, isOnPath }
@@ -75,8 +76,8 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                             animated: false,
                             style: { 
                                 strokeWidth: 1.5, 
-                                stroke: isPrereq ? '#6b7280' : '#4b5563', 
-                                opacity: 0.3, 
+                                stroke: isPrereq ? '#94a3b8' : '#cbd5e1', 
+                                opacity: 0.6, 
                                 strokeDasharray: isPrereq ? 'none' : '4,4' 
                             },
                         };
@@ -84,7 +85,6 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
 
                     const d3Links = styledEdges.map(e => ({ source: e.source, target: e.target, id: e.id }));
 
-                    // FIXED: Restored reasonable physics so it stays on screen
                     const simulation = forceSimulation(styledNodes)
                         .force('charge', forceManyBody().strength(-2000)) 
                         .force('center', forceCenter(window.innerWidth / 2, window.innerHeight / 2))
@@ -143,8 +143,9 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                         isWeak = !isCorrect;
                         isNew = false;
                         
-                        const bg = isCorrect ? '#064e3b' : '#450a0a';
-                        const border = isCorrect ? '#10b981' : '#ef4444';
+                        const bg = isCorrect ? '#f0fdf4' : '#fef2f2';
+                        const border = isCorrect ? '#4ade80' : '#f87171';
+                        const textColor = isCorrect ? '#166534' : '#991b1b';
                         
                         if (isMastered) mCount++;
                         else if (isWeak) rCount++;
@@ -156,7 +157,8 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                                 ...n.style, 
                                 backgroundColor: bg, 
                                 borderColor: border,
-                                boxShadow: n.data.isOnPath ? `0 0 15px ${border}80` : '0 4px 6px -1px rgba(0, 0, 0, 0.5)'
+                                color: textColor,
+                                boxShadow: n.data.isOnPath ? `0 0 15px ${border}80` : '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
                             },
                             data: { ...n.data, isMastered, isWeak, isNew }
                         };
@@ -197,7 +199,7 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                 <Handle type="target" position={Position.Top} className="opacity-0 border-none" />
                 <Handle type="source" position={Position.Bottom} className="opacity-0 border-none" />
                 <div className="font-bold text-sm mb-1">{data.label}</div>
-                <div className="text-xs text-gray-300 line-clamp-2">{data.summary}</div>
+                <div className="text-xs opacity-70 line-clamp-2">{data.summary}</div>
             </div>
         )
     }), []);
@@ -231,20 +233,20 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
     );
 
     return (
-        <div className="w-full h-full relative bg-surface-100 flex flex-col rounded-xl overflow-hidden shadow-sm border border-surface-400">
-            <div className="absolute top-0 w-full z-20 bg-surface-200/95 backdrop-blur-md border-b border-surface-400 p-4 shadow-md">
+        <div className="w-full h-full relative bg-white flex flex-col rounded-xl overflow-hidden shadow-sm border border-surface-400">
+            <div className="absolute top-0 w-full z-20 bg-white/90 backdrop-blur-md border-b border-surface-400 p-4 shadow-sm">
                 <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-bold text-gray-300 tracking-widest uppercase flex items-center">
-                        <Activity className="w-4 h-4 mr-2 text-blue-500" /> Cortex State
+                    <span className="text-xs font-bold text-gray-500 tracking-widest uppercase flex items-center">
+                        <Activity className="w-4 h-4 mr-2 text-purple-600" /> Cortex State
                     </span>
                     
                     <div className="flex items-center space-x-4">
-                        <div className="flex items-center bg-surface-300 rounded-md border border-surface-400 px-2 overflow-hidden">
+                        <div className="flex items-center bg-surface-100 rounded-md border border-surface-400 px-2 overflow-hidden">
                             <Filter className="w-3 h-3 text-gray-400 mr-2" />
                             <select
                                 value={selectedDocFilter}
                                 onChange={(e) => setSelectedDocFilter(e.target.value)}
-                                className="bg-transparent text-xs font-bold text-gray-300 py-1.5 focus:outline-none cursor-pointer max-w-[200px] truncate"
+                                className="bg-transparent text-xs font-bold text-gray-500 py-1.5 focus:outline-none cursor-pointer max-w-[200px] truncate"
                             >
                                 <option value="ALL">All Documents (Merged)</option>
                                 {uniqueDocs.map((doc, idx) => (
@@ -258,9 +260,9 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                     </div>
                 </div>
                 <div className="w-full h-2 bg-surface-400 rounded-full overflow-hidden flex">
-                    <div className="h-full bg-green-500 transition-all duration-500" style={{ width: `${(cortexStats.mastered / cortexStats.total) * 100}%` }} title="Mastered"></div>
-                    <div className="h-full bg-blue-500 transition-all duration-500" style={{ width: `${(cortexStats.new / cortexStats.total) * 100}%` }} title="New"></div>
-                    <div className="h-full bg-red-500 transition-all duration-500" style={{ width: `${(cortexStats.review / cortexStats.total) * 100}%` }} title="Needs Review"></div>
+                    <div className="h-full bg-green-400 transition-all duration-500" style={{ width: `${(cortexStats.mastered / cortexStats.total) * 100}%` }} title="Mastered"></div>
+                    <div className="h-full bg-purple-400 transition-all duration-500" style={{ width: `${(cortexStats.new / cortexStats.total) * 100}%` }} title="New"></div>
+                    <div className="h-full bg-red-400 transition-all duration-500" style={{ width: `${(cortexStats.review / cortexStats.total) * 100}%` }} title="Needs Review"></div>
                 </div>
             </div>
 
@@ -275,51 +277,47 @@ export default function CortexPanel({ workspaceId, onResourceClick }) {
                     fitView 
                     minZoom={0.05} 
                     maxZoom={2}
-                    className="dark"
                 >
-                    <Background color="#374151" gap={20} />
-                    <Controls className="bg-surface-300 fill-white border-surface-400 rounded-xl" />
+                    <Background color="#cbd5e1" gap={20} />
+                    <Controls className="bg-white fill-gray-600 border-surface-400 rounded-xl shadow-sm" />
                 </ReactFlow>
             </div>
 
             <AnimatePresence>
                 {selectedNodeData && (
-                    <motion.div initial={{ x: '100%', opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: '100%', opacity: 0 }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="absolute top-0 right-0 w-full md:w-[450px] h-full bg-surface-200/95 backdrop-blur-xl border-l border-surface-400 shadow-2xl z-50 flex flex-col pt-16">
+                    <motion.div initial={{ x: '100%', opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: '100%', opacity: 0 }} transition={{ type: "spring", damping: 25, stiffness: 200 }} className="absolute top-0 right-0 w-full md:w-[450px] h-full bg-white/95 backdrop-blur-xl border-l border-surface-400 shadow-2xl z-50 flex flex-col pt-16">
                         <div className="p-6 border-b border-surface-400 flex justify-between items-start">
                             <div>
-                                <h3 className="text-2xl font-bold text-white mb-2">{selectedNodeData.label}</h3>
-                                <p className="text-gray-400 text-sm">{selectedNodeData.summary}</p>
+                                <h3 className="text-2xl font-bold text-gray-900 mb-2">{selectedNodeData.label}</h3>
+                                <p className="text-gray-600 text-sm">{selectedNodeData.summary}</p>
                             </div>
-                            <button onClick={() => setSelectedNodeData(null)} className="bg-surface-300 hover:bg-surface-400 p-2 rounded-xl text-gray-400 hover:text-white transition-colors cursor-pointer"><X className="w-5 h-5" /></button>
+                            <button onClick={() => setSelectedNodeData(null)} className="bg-surface-100 hover:bg-surface-300 border border-surface-400 p-2 rounded-xl text-gray-500 hover:text-gray-800 transition-colors cursor-pointer"><X className="w-5 h-5" /></button>
                         </div>
                         
-                        <div className="p-4 bg-surface-300/50 border-b border-surface-400 flex space-x-3">
-                            <button onClick={() => handleMasteryUpdate(selectedNodeData.label, true)} className="flex-1 py-2 bg-green-900/30 hover:bg-green-800/50 text-green-400 border border-green-800 rounded-lg text-sm font-bold flex justify-center items-center transition-colors cursor-pointer">
+                        <div className="p-4 bg-surface-100 border-b border-surface-400 flex space-x-3">
+                            <button onClick={() => handleMasteryUpdate(selectedNodeData.label, true)} className="flex-1 py-2 bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 rounded-lg text-sm font-bold flex justify-center items-center transition-colors cursor-pointer">
                                 <CheckCircle className="w-4 h-4 mr-2" /> Mark Mastered
                             </button>
-                            <button onClick={() => handleMasteryUpdate(selectedNodeData.label, false)} className="flex-1 py-2 bg-red-900/30 hover:bg-red-800/50 text-red-400 border border-red-800 rounded-lg text-sm font-bold flex justify-center items-center transition-colors cursor-pointer">
+                            <button onClick={() => handleMasteryUpdate(selectedNodeData.label, false)} className="flex-1 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg text-sm font-bold flex justify-center items-center transition-colors cursor-pointer">
                                 <AlertTriangle className="w-4 h-4 mr-2" /> Needs Review
                             </button>
                         </div>
 
                         <div className="p-6 overflow-y-auto flex-1 space-y-8">
-                            <div className="prose prose-invert prose-sm">
-                                <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-2">Deep Dive</h4>
-                                <p className="text-gray-300 leading-relaxed whitespace-pre-wrap">{selectedNodeData.details}</p>
+                            <div className="prose prose-sm">
+                                <h4 className="text-gray-400 uppercase tracking-widest text-xs font-bold mb-2">Deep Dive</h4>
+                                <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{selectedNodeData.details}</p>
                             </div>
 
                             {selectedNodeData.resources && selectedNodeData.resources.length > 0 && (
-                                <div className="mt-6 border-t border-surface-400 pt-4">
-                                    <h4 className="text-gray-500 uppercase tracking-widest text-xs font-bold mb-3">Source Media</h4>
+                                <div className="mt-6 border-t border-surface-400 pt-4 pb-6">
+                                    <h4 className="text-gray-400 uppercase tracking-widest text-xs font-bold mb-3">Source Media</h4>
                                     <div className="flex flex-wrap gap-2">
                                         {selectedNodeData.resources.map((res, idx) => (
                                             <button
                                                 key={idx}
-                                                // FIXED: Remove the manual page string append. We pass the clean original source tag!
-                                                onClick={() => {
-                                                    onResourceClick(res.source_tag);
-                                                }}
-                                                className={`inline-flex items-center px-3 py-2 rounded-md text-xs font-bold transition-colors shadow-sm cursor-pointer text-white ${res.type === 'video' ? 'bg-blue-600 hover:bg-blue-500' : 'bg-red-600 hover:bg-red-500'}`}
+                                                onClick={() => { onResourceClick(res.source_tag); }}
+                                                className={`inline-flex items-center px-3 py-2 rounded-md text-xs font-bold transition-colors shadow-sm cursor-pointer border ${res.type === 'video' ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'}`}
                                             >
                                                 {res.type === 'video' ? <Video className="w-4 h-4 mr-2" /> : <FileText className="w-4 h-4 mr-2" />}
                                                 {res.title}
